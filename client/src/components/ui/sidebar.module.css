@@ -1,0 +1,33 @@
+/* Keep icon mode in the primitive, including callers with custom bot icons. */
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-button"] {
+  justify-content: center;
+  gap: 0;
+  width: 2.5em;
+  height: 2.5em;
+  margin-inline: auto;
+  padding: 0;
+}
+
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-button"] > :not(svg):not([data-sidebar="menu-icon"]),
+.root[data-collapsible="icon"] [data-slot="sidebar-group-label"],
+.root[data-collapsible="icon"] [data-slot="sidebar-group-action"],
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-action"],
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-badge"],
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-sub"] {
+  display: none;
+}
+
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-button"] > svg,
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-button"] > [data-sidebar="menu-icon"] {
+  display: block;
+  flex: 0 0 1.25em;
+  width: 1.25em;
+  height: 1.25em;
+  margin: 0;
+}
+
+.root[data-collapsible="icon"] [data-slot="sidebar-menu-button"] > [data-sidebar="menu-icon"] {
+  flex-basis: 1.75em;
+  width: 1.75em !important;
+  height: 1.75em !important;
+}

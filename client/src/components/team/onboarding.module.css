@@ -1,0 +1,416 @@
+/* First run: one idea per screen, generous type, the team front and centre. */
+.shell { min-height:100%; display:grid; grid-template-columns:minmax(0, 1fr); gap:1.5rem; padding:1rem 1.25rem 3rem; }
+.side { display:flex; justify-content:center; align-items:center; padding:clamp(1.5rem, 5vh, 3rem) 0; }
+.column { width:100%; max-width:32rem; display:flex; flex-direction:column; }
+/* The live stage sits beside the steps only when the page area has room for both (`StageShell`). */
+.shell[data-wide] { grid-template-columns:minmax(26rem, 0.95fr) minmax(0, 1.05fr); height:100%; min-height:0; padding:0.75rem 0.75rem 0.75rem 1.5rem; }
+.shell[data-wide] .side { padding:2rem 2.5rem; overflow-y:auto; }
+.shell[data-wide] .crew > :not(:first-child) { display:none; }
+.stageWrap { height:calc(100dvh - 1.5rem); position:sticky; top:0.75rem; }
+.progress { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:0.4rem; margin-bottom:clamp(2rem, 7vh, 4rem); }
+.progress span { height:3px; border-radius:99px; background:color-mix(in oklab, var(--foreground) 12%, transparent); overflow:hidden; }
+.progress span[data-on]::after { content:""; display:block; height:100%; background:var(--foreground); animation:fill var(--dur-slow) ease-out both; }
+@keyframes fill { from { width:0; } to { width:100%; } }
+
+.step { display:flex; flex-direction:column; animation:rise var(--dur-slow) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes rise { from { opacity:0; transform:translateY(0.6rem); } }
+@media (prefers-reduced-motion: reduce) { .step, .progress span[data-on]::after, .crew > * { animation:none !important; } }
+
+.back { align-self:flex-start; display:inline-flex; align-items:center; gap:0.35rem; margin:-0.25rem 0 1.25rem; padding:0.25rem 0; background:none; border:0; color:var(--muted-foreground); font:inherit; font-size:0.875rem; cursor:pointer; }
+.back:hover { color:var(--foreground); }
+/* A control for one screen size only (New strategy's top link on wide screens, its Cancel on phones). */
+@media (max-width: 48rem) { .wideOnly { display:none !important; } }
+@media (min-width: 48.0625rem) { .phoneOnly { display:none !important; } }
+.title { font-size:clamp(2.1rem, 5.5vw, 2.9rem); font-weight:650; letter-spacing:-0.035em; line-height:1.04; margin:0; text-wrap:balance; }
+/* A plan's name and its pencil are one row, so no text wrapping (Safari's balance and pretty included) can put the pencil on a line of its own. */
+.named { display:flex; align-items:center; gap:0.55rem; }
+.named > span { min-width:0; overflow-wrap:anywhere; }
+.lead { font-size:1.0625rem; line-height:1.55; color:var(--muted-foreground); margin:1rem 0 0; max-width:30rem; text-wrap:pretty; }
+
+/* Intro */
+.crew { display:flex; align-items:flex-end; gap:0.9rem; margin-bottom:2.25rem; }
+/* Invite-only: a quiet lock until an invite is in hand, then a green "You're invited". */
+.invite { align-self:flex-start; display:inline-flex; align-items:center; gap:0.4rem; height:1.75rem; margin-bottom:1rem; padding:0 0.75rem 0 0.6rem; border-radius:99px; font-size:0.8125rem; font-weight:600; background:color-mix(in oklab, var(--foreground) 7%, transparent); color:var(--muted-foreground); }
+.invite svg { width:0.9rem; height:0.9rem; }
+.invite .spin { width:0.9rem; height:0.9rem; color:currentColor; }
+.invite[data-on] { background:color-mix(in oklab, var(--positive) 16%, transparent); color:var(--positive); }
+.inviteForm { display:flex; flex-direction:column; gap:0.5rem; }
+.inviteForm .inlineButton { min-width:6.5rem; height:3.25rem !important; gap:0.45rem; }
+.inviteForm .spin { color:currentColor; }
+.inviteError { margin:0; padding:0 1rem; font-size:0.8125rem; line-height:1.45; color:var(--destructive); }
+.inviteCode { height:3.25rem; font-family:var(--font-num); font-weight:600; letter-spacing:0.16em; text-transform:uppercase; }
+.inviteCode::placeholder { font-weight:400; letter-spacing:0.02em; text-transform:none; }
+.crew > * { animation:float 5s ease-in-out infinite; }
+.crew > :nth-child(2) { animation-delay:-1.6s; }
+.crew > :nth-child(3) { animation-delay:-3.2s; }
+.crew > :nth-child(4) { animation-delay:-0.8s; }
+@keyframes float { 50% { transform:translateY(-5px); } }
+.jobs { display:flex; flex-direction:column; gap:1.1rem; margin:2.25rem 0 2.5rem; }
+.job { display:flex; align-items:center; gap:0.9rem; }
+.job strong { display:block; font-size:0.9375rem; font-weight:600; }
+.job span { font-size:0.9375rem; color:var(--muted-foreground); }
+
+/* Choices */
+.options { display:flex; flex-direction:column; gap:0.6rem; margin:2rem 0 1rem; }
+/* Option cards, tiles and panels take the Theme menu's card style and corners (globals.css), so a change there shows here at once. */
+.option { display:flex; align-items:center; gap:1rem; width:100%; padding:1rem 1.1rem; border-radius:calc(1.15rem * var(--r-scale)); border:1px solid transparent; background:var(--surface-bg); box-shadow:var(--surface-shadow); color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast); }
+.option:hover { box-shadow:var(--surface-hover); }
+.option:active { transform:scale(0.995); }
+.option[aria-checked="true"] { border-color:color-mix(in oklab, var(--ember) 65%, transparent); background:color-mix(in oklab, var(--ember) 9%, transparent); }
+.option[data-style="clips"] { --style-color:var(--info); }
+.option[data-style="runners"] { --style-color:var(--warning); }
+.option[data-style="degen"] { --style-color:var(--ember); }
+.option:focus-visible { outline:2px solid color-mix(in oklab, var(--ember) 80%, var(--foreground)); outline-offset:3px; }
+.icon { width:2.6rem; height:2.6rem; border-radius:0.85rem; display:grid; place-items:center; flex-shrink:0; color:color-mix(in oklab, var(--style-color) 80%, var(--foreground)); background:color-mix(in oklab, var(--style-color) 12%, transparent); }
+.icon svg { width:1.2rem; height:1.2rem; }
+.optionText { flex:1; min-width:0; display:flex; flex-direction:column; gap:0.2rem; }
+.optionText strong { font-size:1rem; font-weight:600; }
+.optionText span { font-size:0.875rem; line-height:1.45; color:var(--muted-foreground); }
+.radio { width:1.15rem; height:1.15rem; border-radius:50%; border:1.5px solid color-mix(in oklab, var(--foreground) 25%, transparent); flex-shrink:0; display:grid; place-items:center; }
+.option[aria-checked="true"] .radio { border-color:color-mix(in oklab, var(--ember) 80%, var(--foreground)); }
+.option[aria-checked="true"] .radio::after { content:""; width:0.55rem; height:0.55rem; border-radius:50%; background:color-mix(in oklab, var(--ember) 80%, var(--foreground)); }
+.link { align-self:flex-start; background:none; border:0; padding:0.35rem 0; color:var(--muted-foreground); font:inherit; font-size:0.9375rem; cursor:pointer; text-decoration:underline; text-underline-offset:0.2em; text-decoration-color:color-mix(in oklab, var(--foreground) 25%, transparent); }
+.link:hover { color:var(--foreground); }
+.describe { width:100%; min-height:6.5rem; resize:none; margin-top:0.25rem; padding:0.95rem 1.1rem; border-radius:1.15rem; border:1px solid color-mix(in oklab, var(--foreground) 12%, transparent); background:color-mix(in oklab, var(--foreground) 3.5%, transparent); color:inherit; font:inherit; font-size:1rem; line-height:1.5; outline:none; }
+.describe:focus { border-color:color-mix(in oklab, var(--foreground) 30%, transparent); }
+.describe::placeholder { color:var(--muted-foreground); }
+
+/* Plan */
+.pencil { display:grid; place-items:center; flex-shrink:0; width:2rem; height:2rem; border-radius:0.6rem; border:0; background:none; color:var(--muted-foreground); cursor:pointer; transition:background var(--dur-fast), color var(--dur-fast); }
+.pencil:hover { background:color-mix(in oklab, var(--foreground) 8%, transparent); color:var(--foreground); }
+.pencil svg { width:1rem; height:1rem; }
+.nameInput { width:100%; min-width:0; padding:0 0 0.15rem; border:0; border-bottom:2px solid color-mix(in oklab, var(--ember) 70%, transparent); outline:none; background:none; color:inherit; font:inherit; font-size:clamp(2.1rem, 5.5vw, 2.9rem); font-weight:650; letter-spacing:-0.035em; line-height:1.04; }
+.planBody { display:flex; flex-direction:column; gap:1.25rem; transition:opacity var(--dur-fast); }
+.planBody[data-busy] { opacity:0.45; pointer-events:none; }
+.plan { display:flex; flex-direction:column; gap:1.1rem; margin:1.75rem 0 0; }
+.planRow { display:flex; align-items:flex-start; gap:1rem; }
+.planRow > div { flex:1; min-width:0; display:flex; flex-direction:column; gap:0.15rem; }
+.planRow > div > small { font-size:0.75rem; font-weight:500; color:var(--muted-foreground); letter-spacing:0.02em; }
+.planRow > div > span { font-size:1rem; line-height:1.45; }
+.planRow ul { margin-top:0.7rem; }
+/* ResearchBot's second line: how many coins fit now, and the checks its line doesn't name. */
+.found { display:flex; flex-wrap:wrap; align-items:center; gap:0.3rem 1rem; margin-top:0.3rem; font-size:0.8125rem; color:var(--muted-foreground); }
+.fit { display:inline-flex; align-items:center; gap:0.5rem; }
+.fit b { font-weight:600; color:var(--foreground); }
+.checks { display:inline-flex; align-items:center; gap:0.2rem; padding:0.15rem 0; border:0; background:none; color:var(--muted-foreground); font:inherit; cursor:pointer; transition:color var(--dur-fast); }
+.checks:hover { color:var(--foreground); }
+.checks:focus-visible { outline:2px solid color-mix(in oklab, var(--ember) 80%, var(--foreground)); outline-offset:2px; border-radius:0.3rem; }
+.checks svg { width:0.9rem; height:0.9rem; transition:transform var(--dur-fast) cubic-bezier(0.2, 0.8, 0.2, 1); }
+.checks[aria-expanded="true"] svg { transform:rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .checks svg { transition:none; } }
+.stack { display:flex; }
+.stack > * { margin-left:-0.35rem; box-shadow:0 0 0 2px var(--background); border-radius:50%; }
+.stack > :first-child { margin-left:0; }
+.label { font-size:0.8125rem; font-weight:500; color:var(--muted-foreground); margin-bottom:0.6rem; }
+.change { display:block; margin-top:1.1rem; font-size:0.875rem; }
+.swap { display:grid; }
+.swap > * { grid-area:1 / 1; align-self:start; min-width:0; }
+.budgetHead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:0.25rem 1rem; margin:2rem 0 0.6rem; font-size:0.8125rem; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.budgetHead > :first-child { font-weight:500; }
+.segmented { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; padding:0.25rem; border-radius:99px; background:color-mix(in oklab, var(--foreground) 6%, transparent); }
+.segmented button { border:0; background:none; color:var(--muted-foreground); font:inherit; font-size:0.9375rem; font-weight:500; padding:0.55rem 0; border-radius:99px; cursor:pointer; font-variant-numeric:tabular-nums; transition:color var(--dur-fast), background var(--dur-fast); }
+.segmented button[aria-checked="true"] { background:var(--foreground); color:var(--background); }
+.note { font-size:0.8125rem; color:var(--muted-foreground); margin:0.6rem 0 0; }
+.advice { display:flex; flex-direction:column; gap:0.75rem; padding:0.85rem 1rem; border-radius:1rem; background:color-mix(in oklab, var(--warning) 9%, transparent); }
+.advice p { display:flex; align-items:flex-start; gap:0.65rem; margin:0; font-size:0.875rem; line-height:1.45; color:color-mix(in oklab, var(--warning) 85%, var(--foreground)); }
+.advice p > :first-child { margin-top:-0.1rem; }
+.fixes { display:flex; flex-wrap:wrap; gap:0.4rem; }
+.fixes button { height:2rem; padding:0 0.85rem; border-radius:99px; border:1px solid color-mix(in oklab, var(--warning) 45%, transparent); background:none; color:var(--warning); font:inherit; font-size:0.8125rem; font-weight:550; cursor:pointer; transition:background var(--dur-fast); }
+.fixes button:hover { background:color-mix(in oklab, var(--warning) 14%, transparent); }
+.refine { display:flex; align-items:center; gap:0.4rem; margin-top:1.25rem; padding:0.3rem 0.3rem 0.3rem 1.1rem; border-radius:99px; border:1px solid color-mix(in oklab, var(--foreground) 12%, transparent); background:color-mix(in oklab, var(--foreground) 3.5%, transparent); transition:border-color var(--dur-fast); }
+.refine:focus-within { border-color:color-mix(in oklab, var(--foreground) 30%, transparent); }
+.refine input { flex:1; min-width:0; height:2.2rem; border:0; outline:none; background:none; color:inherit; font:inherit; font-size:0.9375rem; }
+.refine input::placeholder { color:var(--muted-foreground); }
+@media (pointer: coarse) { .refine input { font-size:1rem; } }
+.send { flex-shrink:0; display:grid; place-items:center; width:2.2rem; height:2.2rem; border-radius:50%; border:0; background:var(--foreground); color:var(--background); cursor:pointer; transition:opacity var(--dur-fast); }
+.send:disabled { opacity:0.3; cursor:default; }
+.send svg { width:1rem; height:1rem; }
+.suggest { display:flex; flex-wrap:wrap; gap:0.4rem; margin-top:0.65rem; }
+.suggest button { height:1.9rem; padding:0 0.8rem; border-radius:99px; border:0; background:color-mix(in oklab, var(--foreground) 6%, transparent); color:var(--muted-foreground); font:inherit; font-size:0.8125rem; cursor:pointer; transition:background var(--dur-fast), color var(--dur-fast); }
+.suggest button:hover:not(:disabled) { background:color-mix(in oklab, var(--foreground) 11%, transparent); color:var(--foreground); }
+.suggest button:disabled { opacity:0.5; cursor:default; }
+
+.cta { margin-top:2rem; width:100%; height:3.25rem !important; font-size:1rem !important; border-radius:99px !important; }
+.actions { display:flex; flex-direction:column; gap:0.6rem; width:100%; margin-top:2rem; }
+.actions > .cta { margin-top:0; width:100%; }
+.fine { font-size:0.8125rem; color:var(--muted-foreground); margin:0.3rem 0 0; text-align:center; }
+/* Phones: each step fills the screen edge to edge, its content clear of the status bar and home indicator, and its buttons sit at the bottom,
+   within thumb reach. The gaps follow the screen's height, so a step fits a regular iPhone in Safari without scrolling. */
+@media (max-width: 48rem) {
+  .shell { min-height:100dvh; padding:calc(0.5rem + env(safe-area-inset-top)) 1.25rem calc(0.75rem + env(safe-area-inset-bottom)); }
+  .side { align-items:stretch; padding:clamp(0.25rem, 1.5svh, 1.5rem) 0 0; }
+  .progress { margin-bottom:clamp(1rem, 4svh, 3rem); }
+  .crew { margin-bottom:clamp(1rem, 3svh, 2.25rem); }
+  .step > .facts { margin-top:clamp(1rem, 3svh, 2.25rem); gap:clamp(0.6rem, 1.75svh, 1rem); }
+  .step { flex:1; }
+  .step > :is(.actions, .cta) { margin-top:auto; }
+  .step > :has(+ :is(.actions, .cta)) { margin-bottom:clamp(1rem, 3svh, 2rem); }
+  /* A step taller than the screen scrolls under its buttons: they stay pinned above the home indicator, and the page fades in behind them.
+     The negative margin takes back the shell's bottom padding, which the buttons carry themselves. Not in HOTBOT's chat card. */
+  .step:not([data-variant=card]) > .actions { position:sticky; bottom:0; z-index:1; padding:0.75rem 0 calc(0.75rem + env(safe-area-inset-bottom)); margin-bottom:calc(-0.75rem - env(safe-area-inset-bottom)); }
+  .step:not([data-variant=card]) > .actions::before { content:""; position:absolute; inset:-1rem -1.25rem 0; z-index:-1; background:linear-gradient(transparent, var(--background) 1.75rem); pointer-events:none; }
+}
+
+/* Sign in: wallets, then email or X, as the same rows as the style choices. */
+.group { margin-top:2rem; }
+.signinRows { display:flex; flex-direction:column; gap:0.6rem; }
+.signinRows .option { text-decoration:none; }
+.option:disabled { cursor:default; opacity:0.55; }
+.option:disabled:hover { box-shadow:var(--surface-shadow); }
+.option[aria-busy="true"] { opacity:1; border-color:color-mix(in oklab, var(--foreground) 16%, transparent); }
+.neutral { --style-color:var(--foreground); color:var(--foreground); background:color-mix(in oklab, var(--foreground) 7%, transparent); }
+.neutral svg { width:1.15rem; height:1.15rem; }
+.brand { overflow:hidden; background:none; }
+.brand img { width:100%; height:100%; object-fit:cover; }
+.go { width:1.1rem; height:1.1rem; flex-shrink:0; color:var(--muted-foreground); transition:transform var(--dur-fast), color var(--dur-fast); }
+.option:not(:disabled):hover .go { color:var(--foreground); transform:translateX(2px); }
+.spin { width:1.1rem; height:1.1rem; flex-shrink:0; color:var(--muted-foreground); animation:spin 0.9s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.emailBox { display:flex; flex-direction:column; gap:0.6rem; padding:1rem 1.1rem; border-radius:calc(1.15rem * var(--r-scale)); background:var(--surface-bg); box-shadow:var(--surface-shadow); }
+.emailBox .note { margin:0; font-size:0.875rem; }
+.inline { display:flex; gap:0.5rem; }
+.field { flex:1; min-width:0; height:3rem; padding:0 1rem; border-radius:99px; border:1px solid color-mix(in oklab, var(--foreground) 14%, transparent); background:var(--background); color:inherit; font:inherit; font-size:1rem; outline:none; transition:border-color var(--dur-fast); }
+.field:focus { border-color:color-mix(in oklab, var(--foreground) 35%, transparent); }
+.field::placeholder { color:var(--muted-foreground); }
+.inlineButton { height:3rem !important; border-radius:99px !important; padding-inline:1.25rem !important; }
+.code { flex:none; width:100%; letter-spacing:0.5em; font-family:var(--font-num); font-variant-numeric:tabular-nums; font-size:1.25rem; text-align:center; }
+.codeLinks { display:flex; justify-content:space-between; gap:1rem; }
+.codeLinks .link { font-size:0.8125rem; }
+.link:disabled { cursor:default; opacity:0.5; }
+@media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
+
+/* Live stage: the pipeline running on real market coins. */
+.stage { position:relative; height:100%; border-radius:calc(1.75rem * var(--r-scale)); overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:3rem; padding:2.5rem;
+  background:radial-gradient(120% 80% at 50% 0%, color-mix(in oklab, var(--theme-accent, #f47a38) 16%, transparent), transparent 60%), color-mix(in oklab, var(--foreground) 3%, var(--background));
+  box-shadow:var(--surface-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 7%, transparent); }
+.stageHead { position:absolute; top:1.5rem; left:1.75rem; display:flex; align-items:center; gap:0.55rem; font-size:0.8125rem; font-weight:500; color:var(--muted-foreground); }
+.live { width:0.5rem; height:0.5rem; border-radius:50%; background:var(--positive); box-shadow:0 0 0 0 color-mix(in oklab, var(--positive) 55%, transparent); animation:ping 2s infinite; }
+@keyframes ping { 70% { box-shadow:0 0 0 0.5rem transparent; } 100% { box-shadow:0 0 0 0 transparent; } }
+.lanes { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:1rem; }
+.lane { position:relative; display:flex; flex-direction:column; align-items:center; gap:0.85rem; text-align:center; }
+.lane > strong { font-size:0.9375rem; font-weight:600; }
+.laneBot { height:5.25rem; display:flex; align-items:flex-end; animation:float 5s ease-in-out infinite; }
+.lane:nth-child(2) .laneBot { animation-delay:-1.6s; }
+.lane:nth-child(3) .laneBot { animation-delay:-3.2s; }
+.arrow { position:absolute; top:2.4rem; right:calc(-0.5rem - 18%); width:36%; height:2px; background:repeating-linear-gradient(90deg, color-mix(in oklab, var(--foreground) 22%, transparent) 0 6px, transparent 6px 12px); background-size:24px 2px; animation:march 1.2s linear infinite; }
+@keyframes march { to { background-position:24px 0; } }
+.chips { display:flex; flex-direction:column; gap:0.5rem; width:100%; max-width:11rem; }
+.chip { display:flex; align-items:center; gap:0.6rem; padding:0.5rem 0.65rem; border-radius:calc(0.9rem * var(--r-scale)); background:var(--surface-bg); box-shadow:var(--surface-shadow); text-align:left; opacity:0.55; animation:chipIn var(--dur-slow) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.chip[data-active] { opacity:1; box-shadow:var(--surface-hover); }
+.chip span { display:flex; flex-direction:column; min-width:0; }
+.chip b { font-size:0.875rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chip small { font-size:0.75rem; color:var(--muted-foreground); }
+@keyframes chipIn { from { opacity:0; transform:translateY(-0.4rem) scale(0.97); } }
+.log { list-style:none; margin:0 auto; padding:0; width:100%; max-width:30rem; display:flex; flex-direction:column; gap:0.7rem; }
+.log li { display:flex; align-items:center; gap:0.7rem; font-size:0.875rem; animation:chipIn var(--dur-slow) ease-out both; }
+.logText { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.log time { font-size:0.75rem; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .laneBot, .arrow, .chip, .log li, .live { animation:none !important; } }
+
+.facts { list-style:none; margin:2.25rem 0 0.5rem; padding:0; display:flex; flex-direction:column; gap:1rem; }
+.facts li { display:flex; align-items:flex-start; gap:0.85rem; font-size:0.9375rem; line-height:1.5; color:var(--muted-foreground); text-wrap:pretty; }
+.facts li b { color:var(--foreground); font-weight:600; }
+.facts svg { width:1.15rem; height:1.15rem; flex-shrink:0; margin-top:0.15rem; color:var(--foreground); }
+
+/* Beta notes: a compact title, two cards, a line on what comes later, and the button is the agree. Report wears the warning tint and the app's own red flag. */
+.betaTitle { margin:0; font-size:1.75rem; font-weight:650; letter-spacing:-0.03em; line-height:1.1; text-wrap:balance; }
+.betaCards { list-style:none; margin:1.1rem 0 0; padding:0; display:flex; flex-direction:column; gap:0.4rem; }
+.betaCards li { display:flex; align-items:center; gap:0.8rem; padding:0.7rem 0.95rem 0.7rem 0.7rem; border-radius:calc(1.15rem * var(--r-scale)); background:var(--surface-bg); box-shadow:var(--surface-shadow); }
+.betaCards li[data-report] { background:color-mix(in oklab, var(--warning) 10%, transparent); box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--warning) 28%, transparent); }
+.betaIcon { width:2.375rem; height:2.375rem; flex-shrink:0; display:grid; place-items:center; border-radius:0.8rem; background:color-mix(in oklab, var(--foreground) 7%, transparent); color:var(--foreground); }
+.betaIcon > svg { width:1.1rem; height:1.1rem; }
+li[data-report] .betaIcon { background:color-mix(in oklab, var(--destructive) 14%, transparent); color:var(--destructive); }
+.betaText { flex:1; min-width:0; display:flex; flex-direction:column; gap:0.15rem; }
+.betaText b { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; font-size:0.9375rem; font-weight:600; line-height:1.3; }
+li[data-report] .betaText b { color:var(--warning); }
+.betaText > span { font-size:0.8125rem; line-height:1.4; color:var(--muted-foreground); text-wrap:pretty; }
+.betaValue { flex-shrink:0; display:inline-flex; align-items:center; height:1.5rem; padding:0 0.6rem; border-radius:99px; background:color-mix(in oklab, var(--foreground) 7%, transparent); font-family:var(--font-num); font-size:0.8125rem; font-weight:600; font-variant-numeric:tabular-nums; }
+.betaMore { margin:0.9rem 0 0; font-size:0.8125rem; line-height:1.45; color:var(--muted-foreground); }
+.chip { min-height:2.9rem; }
+.chipIdle { display:flex; align-items:center; justify-content:center; gap:0.5rem; min-height:2.9rem; padding:0.5rem 0.65rem; border-radius:calc(0.9rem * var(--r-scale)); border:1px dashed color-mix(in oklab, var(--foreground) 16%, transparent); font-size:0.8125rem; color:var(--muted-foreground); }
+.idleDot { width:0.4rem; height:0.4rem; border-radius:50%; background:color-mix(in oklab, var(--foreground) 35%, transparent); animation:breathe 2.4s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity:0.25; } }
+.more { font-size:0.75rem; color:var(--muted-foreground); text-align:center; }
+
+/* Team strip (the launch step without its Stage): three small cards, each bot with the coin it is on and what it is doing. */
+.strip { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:0.5rem; }
+.stripBot { display:flex; flex-direction:column; gap:0.3rem; min-width:0; padding:0.6rem 0.7rem 0.65rem; border-radius:calc(0.95rem * var(--r-scale)); background:var(--surface-bg); box-shadow:var(--surface-shadow); color:inherit; text-decoration:none; transition:box-shadow var(--dur-fast); }
+.stripBot[href]:hover { box-shadow:var(--surface-hover); }
+.stripHead { display:flex; align-items:center; gap:0.4rem; min-width:0; }
+.stripHead small { font-size:0.75rem; font-weight:500; color:var(--muted-foreground); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stripHead i { margin-left:auto; font-style:normal; font-size:0.6875rem; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.stripCoin { display:flex; align-items:center; gap:0.35rem; min-width:0; font-size:0.8125rem; }
+.stripCoin b { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stripStatus { font-style:normal; font-size:0.75rem; color:var(--muted-foreground); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.stripStatus[data-tone=up] { color:var(--positive); }
+.stripStatus[data-tone=down] { color:var(--destructive); }
+/* The same plan inside HOTBOT's reply card: smaller type, a tighter rhythm and no entrance animation. */
+.step[data-variant=card] { animation:none; }
+.step[data-variant=card] .title { font-size:1.35rem; letter-spacing:-0.025em; }
+.step[data-variant=card] .plan { gap:0.8rem; margin-top:1rem; }
+.step[data-variant=card] .planRow > div > span { font-size:0.875rem; }
+.step[data-variant=card] .actions { margin-top:1.1rem; width:100%; }
+.step[data-variant=card] .cta { height:2.6rem !important; font-size:0.875rem !important; }
+.step[data-variant=card] .suggest { margin-top:0.85rem; }
+
+/* Launch: the team is live. The pill says so, the strip shows each bot's coin where the Stage isn't beside it, then the person's picture, name and look. */
+.livePill { align-self:flex-start; display:inline-flex; align-items:center; gap:0.5rem; height:1.75rem; margin-bottom:1rem; padding:0 0.75rem 0 0.65rem; border-radius:99px; font-size:0.8125rem; font-weight:600; background:color-mix(in oklab, var(--foreground) 7%, transparent); color:var(--muted-foreground); }
+.livePill[data-on] { background:color-mix(in oklab, var(--ember) 14%, transparent); color:var(--ember); }
+.livePulse { width:0.45rem; height:0.45rem; border-radius:50%; background:currentColor; animation:breathe 1.6s ease-in-out infinite; }
+.launchStrip { margin-top:1.75rem; }
+.shell[data-wide] .launchStrip { display:none; }
+.you { display:flex; flex-direction:column; gap:1rem; margin-top:2rem; padding:1.1rem; border-radius:calc(1.15rem * var(--r-scale)); background:var(--surface-bg); box-shadow:var(--surface-shadow); }
+.youRow { display:flex; align-items:center; gap:0.85rem; }
+.youPhoto { position:relative; flex:none; padding:0; border:0; border-radius:50%; background:none; cursor:pointer; }
+.youPhoto:focus-visible { outline:2px solid color-mix(in oklab, var(--ember) 80%, var(--foreground)); outline-offset:3px; }
+.youPhoto:disabled { cursor:default; }
+.youCamera { position:absolute; right:-0.15rem; bottom:-0.15rem; width:1.5rem; height:1.5rem; border-radius:50%; display:grid; place-items:center; background:var(--foreground); color:var(--background); box-shadow:0 0 0 2px var(--background); transition:transform var(--dur-fast); }
+.youCamera svg { width:0.8rem; height:0.8rem; }
+.youCamera .spin { color:var(--background); }
+.youPhoto:not(:disabled):hover .youCamera { transform:scale(1.08); }
+.stageCounts { display:flex; justify-content:center; gap:1.75rem; font-size:0.875rem; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.stageCounts b { color:var(--foreground); font-weight:600; font-size:1rem; margin-right:0.25rem; }
+@media (prefers-reduced-motion: reduce) { .livePulse { animation:none; } }
+
+/* Join (/join): the application. Wide screens scroll through every question, the one in the middle of the window in focus; phones (≤48rem)
+   show one question a screen with Next at the bottom. Reuses the first-run kit above: titles, option rows, fields, buttons. */
+.join { min-height:100dvh; display:flex; flex-direction:column; }
+.joinTop { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:0.75rem; padding:calc(0.85rem + env(safe-area-inset-top)) 1.5rem 0.85rem; background:color-mix(in oklab, var(--background) 78%, transparent); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
+.joinBrand { display:inline-flex; align-items:center; gap:0.5rem; font-size:0.9375rem; font-weight:750; letter-spacing:0.02em; color:inherit; text-decoration:none; }
+.joinBrand:focus-visible, .joinBack:focus-visible { outline:2px solid color-mix(in oklab, var(--ember) 80%, var(--foreground)); outline-offset:3px; border-radius:0.5rem; }
+.joinCount { margin-left:auto; font-size:0.8125rem; font-weight:500; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.joinBar { position:absolute; left:0; right:0; bottom:0; height:2px; background:color-mix(in oklab, var(--foreground) 7%, transparent); }
+.joinBar > i { display:block; height:100%; width:calc(var(--answered) * 100%); background:var(--ember); border-radius:0 99px 99px 0; transition:width var(--dur-slow) cubic-bezier(0.2, 0.8, 0.2, 1); }
+.joinBack { display:grid; place-items:center; width:2.25rem; height:2.25rem; margin:-0.25rem 0 -0.25rem -0.5rem; border:0; border-radius:50%; background:none; color:var(--foreground); cursor:pointer; }
+.joinBack svg { width:1.2rem; height:1.2rem; }
+.joinBody { flex:1; width:100%; max-width:37rem; margin:0 auto; padding:0 1.5rem; }
+.joinHero { min-height:calc(100dvh - 4rem); display:flex; flex-direction:column; justify-content:center; padding:2rem 0 5rem; }
+.joinHero .crew { margin-bottom:1.75rem; }
+.joinHero .facts { margin:2rem 0 0; }
+.joinStart { align-self:flex-start; width:auto !important; margin-top:2.25rem; padding-inline:1.75rem !important; gap:0.5rem; }
+.joinStart svg { animation:nudge 1.8s ease-in-out infinite; }
+@keyframes nudge { 50% { transform:translateY(3px); } }
+
+.q { min-height:68vh; display:flex; flex-direction:column; justify-content:center; padding:3.5rem 0; scroll-margin-top:4rem; opacity:0.3; transition:opacity var(--dur-slow) ease; }
+.q[data-active], .q:focus-within { opacity:1; }
+.qHead { display:flex; align-items:center; gap:0.7rem; margin-bottom:1.1rem; }
+.host { display:inline-grid; }
+.host[data-happy] > * { animation:hop 0.6s cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+@keyframes hop { 40% { transform:translateY(-9px) rotate(-6deg); } 70% { transform:translateY(1px) rotate(2deg); } }
+.qNum { font-size:0.8125rem; font-weight:600; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.qTag { height:1.4rem; display:inline-flex; align-items:center; padding:0 0.55rem; border-radius:99px; font-size:0.6875rem; font-weight:600; letter-spacing:0.02em; color:var(--muted-foreground); background:color-mix(in oklab, var(--foreground) 7%, transparent); }
+.qTitle { font-size:clamp(1.7rem, 4vw, 2.2rem); font-weight:650; letter-spacing:-0.032em; line-height:1.08; margin:0; text-wrap:balance; }
+.qLead { font-size:1rem; line-height:1.5; color:var(--muted-foreground); margin:0.65rem 0 0; text-wrap:pretty; }
+.qBody { display:flex; flex-direction:column; gap:0.6rem; margin-top:1.6rem; }
+.qChoices { display:flex; flex-direction:column; gap:0.6rem; }
+.qError { margin:0.75rem 0 0; font-size:0.875rem; font-weight:500; color:var(--destructive); animation:shake 0.4s ease both; }
+@keyframes shake { 20%, 60% { transform:translateX(-4px); } 40%, 80% { transform:translateX(4px); } }
+.qNext { display:flex; align-items:center; gap:0.85rem; margin-top:1.6rem; font-size:0.8125rem; color:var(--muted-foreground); }
+.qNext > button { height:2.75rem !important; padding-inline:1.35rem !important; border-radius:99px !important; gap:0.4rem; }
+.qNext kbd { font:inherit; font-weight:600; color:var(--foreground); }
+
+/* Handles and the wallet: one pill with "@" (or a wallet) in front and Paste at the end. */
+.handle { display:flex; align-items:center; gap:0.35rem; height:3.4rem; padding:0 0.4rem 0 1.15rem; border-radius:99px; border:1px solid color-mix(in oklab, var(--foreground) 14%, transparent); background:color-mix(in oklab, var(--foreground) 2.5%, var(--background)); transition:border-color var(--dur-fast), box-shadow var(--dur-fast); }
+.handle:focus-within { border-color:color-mix(in oklab, var(--ember) 55%, transparent); box-shadow:0 0 0 4px color-mix(in oklab, var(--ember) 12%, transparent); }
+.handle[data-invalid] { border-color:color-mix(in oklab, var(--destructive) 60%, transparent); }
+.handle > b { font-size:1.125rem; font-weight:600; color:var(--muted-foreground); }
+.handle > svg { width:1.1rem; height:1.1rem; flex-shrink:0; color:var(--muted-foreground); }
+.handle input { flex:1; min-width:0; height:100%; border:0; outline:none; background:none; color:inherit; font:inherit; font-size:1.125rem; }
+.handle input::placeholder { color:var(--muted-foreground); opacity:0.75; }
+.handle input.address { font-family:var(--font-num); font-size:0.9375rem; letter-spacing:0.01em; }
+.paste { flex-shrink:0; display:inline-flex; align-items:center; gap:0.35rem; height:2.6rem; padding:0 0.95rem; border:0; border-radius:99px; background:color-mix(in oklab, var(--foreground) 7%, transparent); color:var(--foreground); font:inherit; font-size:0.8125rem; font-weight:600; cursor:pointer; transition:background var(--dur-fast); }
+.paste:hover { background:color-mix(in oklab, var(--foreground) 12%, transparent); }
+.paste svg { width:0.95rem; height:0.95rem; }
+.holding { align-self:flex-start; display:inline-flex; align-items:center; gap:0.45rem; min-height:2rem; padding:0.3rem 0.85rem 0.3rem 0.7rem; border-radius:99px; font-size:0.8125rem; font-weight:600; font-variant-numeric:tabular-nums; color:var(--muted-foreground); background:color-mix(in oklab, var(--foreground) 6%, transparent); animation:chipIn var(--dur-slow) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.holding[data-tone=ember] { color:var(--ember); background:color-mix(in oklab, var(--ember) 13%, transparent); }
+.holding svg { width:0.95rem; height:0.95rem; flex-shrink:0; }
+.holding .spin { width:0.95rem; height:0.95rem; color:currentColor; }
+.holding b { color:var(--foreground); font-weight:650; }
+.holding[data-tone=ember] b { color:inherit; }
+.buy { display:inline-flex; align-items:center; gap:0.45rem; margin-top:0.35rem; font-size:0.875rem; }
+.buy img { width:1rem; height:1rem; border-radius:0.3rem; }
+.buy svg { width:0.9rem; height:0.9rem; }
+.reveal { display:flex; flex-direction:column; gap:0.6rem; padding-top:0.6rem; }
+
+/* Terminals: one tile each, picked ones lit in ember with a name or link field under them. */
+.terms { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:0.5rem; }
+.term { position:relative; display:flex; flex-direction:column; align-items:center; gap:0.55rem; padding:1rem 0.35rem 0.8rem; border-radius:calc(1.05rem * var(--r-scale)); border:1px solid transparent; background:var(--surface-bg); box-shadow:var(--surface-shadow); color:inherit; font:inherit; font-size:0.8125rem; font-weight:600; cursor:pointer; transition:background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast); }
+.term:hover { box-shadow:var(--surface-hover); }
+.term:active { transform:scale(0.97); }
+.term:focus-visible, .pick:focus-visible, .paste:focus-visible { outline:2px solid color-mix(in oklab, var(--ember) 80%, var(--foreground)); outline-offset:2px; }
+.term img { width:2.4rem; height:2.4rem; border-radius:0.7rem; object-fit:cover; transition:transform var(--dur-fast) cubic-bezier(0.3, 1.6, 0.5, 1); }
+.term[aria-pressed="true"] { border-color:color-mix(in oklab, var(--ember) 65%, transparent); background:color-mix(in oklab, var(--ember) 9%, transparent); }
+.term[aria-pressed="true"] img { transform:scale(1.06); }
+.termCheck { position:absolute; top:0.45rem; right:0.45rem; display:grid; place-items:center; width:1.15rem; height:1.15rem; border-radius:50%; background:var(--ember); color:#fff; transform:scale(0); transition:transform var(--dur-fast) cubic-bezier(0.3, 1.6, 0.5, 1); }
+.termCheck svg { width:0.7rem; height:0.7rem; stroke-width:3; }
+.term[aria-pressed="true"] .termCheck { transform:scale(1); }
+.termRow { display:flex; align-items:center; gap:0.65rem; animation:chipIn var(--dur-slow) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.termRow img { width:2rem; height:2rem; border-radius:0.6rem; flex-shrink:0; object-fit:cover; }
+.termRow .field { height:2.85rem; font-size:0.9375rem; }
+
+/* Tools: toggle pills. */
+.picks { display:flex; flex-wrap:wrap; gap:0.5rem; }
+.pick { display:inline-flex; align-items:center; gap:0.4rem; height:2.6rem; padding:0 1.05rem; border-radius:99px; border:1px solid color-mix(in oklab, var(--foreground) 12%, transparent); background:none; color:var(--muted-foreground); font:inherit; font-size:0.9375rem; font-weight:500; cursor:pointer; transition:background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); }
+.pick:hover { color:var(--foreground); border-color:color-mix(in oklab, var(--foreground) 24%, transparent); }
+.pick:active { transform:scale(0.97); }
+.pick svg { width:0.95rem; height:0.95rem; margin-left:-0.2rem; stroke-width:2.6; }
+.pick[aria-pressed="true"] { color:var(--foreground); border-color:color-mix(in oklab, var(--ember) 65%, transparent); background:color-mix(in oklab, var(--ember) 10%, transparent); }
+.pick[aria-pressed="true"] svg { color:var(--ember); }
+.count { align-self:flex-end; margin-top:-0.15rem; font-size:0.75rem; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.count[data-over] { color:var(--destructive); }
+
+/* The end: Send on wide screens, then the team cheering once it's in. */
+.joinSend { align-items:flex-start; }
+.joinSend .cta { margin-top:1.75rem; }
+.sent { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:3rem 0 4rem; }
+.sent .lead { margin-inline:auto; }
+.sent .livePill { align-self:center; }
+.sent .actions { max-width:22rem; align-items:center; }
+.sent .actions .link { align-self:center; }
+.sentCrew { position:relative; display:flex; align-items:flex-end; gap:1rem; margin-bottom:2.25rem; }
+.sentCrew > span { animation:cheer 0.9s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
+.sentCrew > span:nth-of-type(1) { animation-delay:0.12s; }
+.sentCrew > span:nth-of-type(3) { animation-delay:0.24s; }
+@keyframes cheer { 0% { opacity:0; transform:translateY(1.5rem) scale(0.8); } 55% { opacity:1; transform:translateY(-0.9rem) scale(1.05); } }
+.spark { position:absolute; left:50%; top:45%; width:0.45rem; height:0.45rem; border-radius:50%; background:var(--ember); opacity:0; pointer-events:none; animation:spark 1.2s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+.spark:nth-child(3n) { background:var(--warning); width:0.35rem; height:0.35rem; }
+@keyframes spark { 0% { opacity:1; transform:translate(-50%, -50%) scale(1); } 100% { opacity:0; transform:translate(calc(-50% + var(--x)), calc(-50% + var(--y))) scale(0.3); } }
+.sentHandles { display:flex; flex-wrap:wrap; justify-content:center; gap:0.5rem; margin-top:1.4rem; }
+.sentHandles span { display:inline-flex; align-items:center; gap:0.4rem; height:2rem; padding:0 0.85rem; border-radius:99px; font-size:0.8125rem; font-weight:600; background:color-mix(in oklab, var(--foreground) 6%, transparent); }
+.sentHandles small { font-size:0.75rem; font-weight:500; color:var(--muted-foreground); }
+
+/* Wide screens: questions rise in as they scroll into view. */
+@supports (animation-timeline: view()) {
+  @media (min-width: 48.0625rem) and (prefers-reduced-motion: no-preference) {
+    .q > :not(.qError) { animation:qRise linear both; animation-timeline:view(); animation-range:entry 0% entry 70%; }
+  }
+}
+@keyframes qRise { from { opacity:0; transform:translateY(1.75rem); } }
+.joinNav { display:none; }
+
+/* Phones: one screen a question, its buttons at the bottom within thumb reach, sliding forward and back. */
+@media (max-width: 48rem) {
+  .joinTop { padding:calc(0.6rem + env(safe-area-inset-top)) 1rem 0.6rem; }
+  .joinBar > i { width:calc(var(--step) * 100%); }
+  .joinBody { display:flex; flex-direction:column; padding:0 1rem; }
+  .joinHero, .q { display:none; min-height:0; opacity:1; justify-content:flex-start; padding:clamp(1.25rem, 5svh, 3rem) 0 1.5rem; }
+  .joinHero { justify-content:center; }
+  .joinHero[data-current], .q[data-current] { display:flex; flex:1; animation:slideIn 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .join[data-dir=back] :is(.joinHero, .q)[data-current] { animation-name:slideBack; }
+  .joinSend, .qNext { display:none !important; }
+  .qTitle { font-size:clamp(1.65rem, 7.5vw, 2rem); }
+  .terms { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  .joinNav { position:sticky; bottom:0; z-index:10; display:flex; flex-direction:column; gap:0.5rem; padding:0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom)); background:color-mix(in oklab, var(--background) 82%, transparent); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
+  .joinNav .cta { margin-top:0; }
+  .joinNav .qError { margin:0; text-align:center; }
+  .sent { padding:2rem 0 calc(2rem + env(safe-area-inset-bottom)); }
+}
+@media (min-width: 48.0625rem) { .joinBack { display:none; } }
+@keyframes slideIn { from { opacity:0; transform:translateX(2rem); } }
+@keyframes slideBack { from { opacity:0; transform:translateX(-2rem); } }
+@media (prefers-reduced-motion: reduce) {
+  .joinStart svg, .host[data-happy] > *, .qError, .holding, .termRow, .sentCrew > span, .spark { animation:none !important; }
+  .spark { display:none; }
+  .joinHero[data-current], .q[data-current] { animation:none !important; }
+  .q, .joinBar > i, .term, .term img, .termCheck, .pick { transition:none; }
+}

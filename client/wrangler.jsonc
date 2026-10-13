@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hotbot",
+  "main": ".open-next/worker.js",
+  "keep_names": false,
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  // usehotbot.com is the only address; the workers.dev subdomain is off.
+  "routes": [{ "pattern": "usehotbot.com", "custom_domain": true }, { "pattern": "www.usehotbot.com", "custom_domain": true }],
+  "workers_dev": false,
+  // The server Lab on the agents VM (client/src/app/api/lab/route.ts), reached through the Cloudflare tunnel hotbot-lab.
+  "vpc_services": [{ "binding": "LAB_SERVER", "service_id": "<your-vpc-service-id>", "remote": true }],
+  // Production Convex Auth's public signing key (its /.well-known/jwks.json), so /api/lab checks sign-ins without a Convex call. Update it if the key rotates.
+  "vars": {
+    "CONVEX_AUTH_ISSUER": "https://<your-deployment>.convex.site",
+    "CONVEX_AUTH_JWKS": "<your deployment's /.well-known/jwks.json>"
+  }
+}

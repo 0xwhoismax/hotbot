@@ -1,0 +1,115 @@
+.hotbot {
+  display: block;
+  overflow: visible;
+}
+
+.gaze {
+  transition: transform 160ms ease-out;
+}
+
+.eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hotbot[data-animated="true"] .body {
+  animation: float 5.5s ease-in-out infinite;
+}
+
+.hotbot[data-animated="true"] .eyes {
+  animation: blink 6.8s ease-in-out infinite;
+}
+
+/* Asleep: eyes shut, a slow breath instead of the float, z's drifting up from the top right. */
+.hotbot[data-mood="asleep"] .eyes {
+  animation: none;
+  transform: translateY(4px) scaleY(0.14);
+}
+
+.hotbot[data-animated="true"][data-mood="asleep"] .body {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: breathe 4.2s ease-in-out infinite;
+}
+
+.zs text {
+  font-size: 44px;
+  font-weight: 700;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: drift 3s ease-out infinite;
+}
+
+/* Scan: the eyes sweep side to side while the bot looks for coins; `translate` stacks with the blink's transform. */
+.hotbot[data-animated="true"][data-mood="scan"] .eyes {
+  animation: blink 6.8s ease-in-out infinite, scan 3.2s ease-in-out infinite;
+}
+
+/* Shy: eyes shut while something private shows, with no z's and no breath; the float goes on. */
+.hotbot[data-mood="shy"] .eyes {
+  animation: none;
+  transform: translateY(4px) scaleY(0.14);
+}
+
+/* Worried: wide eyes and a quick "no" of the head while someone is about to leave. The gaze still follows the cursor to what worries it. */
+.hotbot[data-mood="worried"] .eyes {
+  animation: none;
+  transform: scale(1.15, 1.25);
+}
+
+.hotbot[data-animated="true"][data-mood="worried"] .body {
+  transform-box: fill-box;
+  transform-origin: 50% 90%;
+  animation: shake 0.9s ease-in-out infinite;
+}
+
+@keyframes shake {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(-9deg); }
+  40% { transform: rotate(8deg); }
+  60% { transform: rotate(-6deg); }
+  80% { transform: rotate(4deg); }
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.04, 1.06); }
+}
+
+@keyframes drift {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  25% { opacity: 0.85; }
+  100% { opacity: 0; transform: translate(26px, -58px) scale(1.25); }
+}
+
+@keyframes scan {
+  0%, 100% { translate: 0 0; }
+  25% { translate: -11px 0; }
+  65% { translate: 11px 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes blink {
+  0%, 44%, 48%, 100% { transform: scaleY(1); }
+  46% { transform: scaleY(0.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hotbot[data-animated="true"] .body,
+  .hotbot[data-animated="true"] .eyes,
+  .hotbot[data-animated="true"][data-mood] .body,
+  .hotbot[data-animated="true"][data-mood] .eyes {
+    animation: none;
+  }
+
+  /* One still z keeps the sleep readable without motion. */
+  .zs text { animation: none; }
+  .zs text:first-child { opacity: 0.6; transform: translate(12px, -26px); }
+
+  .gaze { transition: none; }
+}

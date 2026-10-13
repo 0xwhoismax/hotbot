@@ -1,0 +1,63 @@
+{
+  "colors": {
+    "hotbot": "#f47a38",
+    "research": "#e5e8ef",
+    "sniper": "#ef6689",
+    "trader": "#649af1",
+    "launch": "#68d69b"
+  },
+  "ink": "#12151d",
+  "accessory": "#30323e",
+  "accessorySecondary": "#505362",
+  "cloud": "M-47 38C-65 37-77 23-74 6C-72-6-64-16-53-18C-58-44-39-65-17-57C-6-76 23-74 36-55C54-59 70-43 68-24C82-15 86 4 76 20C72 29 63 36 51 36C43 51 22 56 7 46C-11 57-33 51-40 38C-42 39-45 39-47 38Z",
+  "flame": "M58 5C67-2 78 24 94 43C106 57 116 73 116 92C116 122 93 142 61 142C28 142 5 121 5 92C5 66 28 46 41 28C49 17 50 10 58 5Z",
+  "glasses": "M-34-9Q-34-19-24-19H-15Q-5-19-5-9V2Q-5 12-15 12H-24Q-34 12-34 2ZM5-9Q5-19 15-19H24Q34-19 34-9V2Q34 12 24 12H15Q5 12 5 2ZM-5-6Q0-9 5-6M-34-8L-47-13M34-8L47-13",
+  "researchGlassesPose": "translate(0 3) rotate(-7)",
+  "researchBrows": "M-31-27Q-23-32-12-27M12-25L29-29",
+  "foilHat": "M-47-49L-33-70-18-80 3-111 15-91 31-74 43-51Z",
+  "foilLight": "M-47-49L-33-70-18-80 3-111-6-72ZM3-111L15-91 31-74 10-80Z",
+  "foilShade": "M-47-49L-6-72 43-51ZM3-111L10-80-6-72Z",
+  "foilCreases": "M-33-70L-6-72 3-111M-18-80L-6-72 10-80 31-74M-6-72L18-55M-34-57L-18-61",
+  "foilRim": "M-49-54Q-5-44 44-56L46-47Q0-34-49-45Z",
+  "headband": "M-61-1V-20C-61-88 61-88 61-20V-1",
+  "capCrown": "M-48-47C-48-69-29-85-6-85C18-85 38-68 40-47Z",
+  "capBrim": "M-48-47H40L64-43C69-42 69-37 62-36H17L7-43H-48Z",
+  "materials": {
+    "hotbot": {
+      "highlight": "#fff3ae",
+      "light": "#ffd053",
+      "base": "#ff8b30",
+      "shade": "#e84c24",
+      "deep": "#a52d21"
+    },
+    "research": {
+      "highlight": "#ffffff",
+      "light": "#f1f4f8",
+      "base": "#d5dde6",
+      "shade": "#9ba8b9",
+      "deep": "#647185"
+    },
+    "sniper": {
+      "highlight": "#ffb4c2",
+      "light": "#ff819e",
+      "base": "#ed4976",
+      "shade": "#a92855",
+      "deep": "#671c3d"
+    },
+    "trader": {
+      "highlight": "#b1e1ff",
+      "light": "#76baff",
+      "base": "#377fed",
+      "shade": "#234caf",
+      "deep": "#152960"
+    },
+    "launch": {
+      "highlight": "#c6ffcf",
+      "light": "#94efb0",
+      "base": "#4cd387",
+      "shade": "#238a60",
+      "deep": "#17503e"
+    }
+  },
+  "flameEdge": "M59 6C60 20 58 30 49 43C40 56 25 61 17 79C19 55 44 30 51 15Z"
+}
