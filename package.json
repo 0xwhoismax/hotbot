@@ -12,5 +12,8 @@
   },
   "dependencies": {
     "convex": "1.46.0"
+  },
+  "overrides": {
+    "toml": "5.0.1"
   }
 }
