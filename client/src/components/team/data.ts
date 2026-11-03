@@ -7,5 +7,8 @@ export type StrategyRow = HomeData['strategies'][number];
 export type Trade = FunctionReturnType<typeof api.team.trades>[number];
 /** Percent move since entry, or null before a mark. */
 export const change = (bag: { entry: { priceUsd: number } | null; markPriceUsd: number | null }) => bag.entry && bag.markPriceUsd ? (bag.markPriceUsd / bag.entry.priceUsd - 1) * 100 : null;
-/** Solana's logo for the team wallet. */
-export const SOL_LOGO = 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
+/** Real profit since `from`: the strategy's total now (sold plus held at the latest prices) less its profit line's value at `from`. */
+export function realSince(strategy: StrategyRow, from: number) {
+  const before = [...strategy.spark].reverse().find(point => point.at <= from)?.pnl ?? 0;
+  return strategy.realizedPnlSol + strategy.openPnlSol - before;
+}

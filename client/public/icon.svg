@@ -1,1 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15.5 -6 152 152"><path d="M58 5C67-2 78 24 94 43C106 57 116 73 116 92C116 122 93 142 61 142C28 142 5 121 5 92C5 66 28 46 41 28C49 17 50 10 58 5Z" fill="#f47a38"/><g fill="#101719"><ellipse cx="45" cy="94" rx="7.3" ry="11.5"/><ellipse cx="76" cy="94" rx="7.3" ry="11.5"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="body" gradientUnits="userSpaceOnUse" cx="268" cy="300" r="290" fx="258" fy="280">
+      <stop stop-color="#ffec9a"/><stop offset=".3" stop-color="#ffc845"/><stop offset=".62" stop-color="#ff8b30"/><stop offset=".88" stop-color="#e84c24"/><stop offset="1" stop-color="#c93a1f"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0a0a0a"/>
+  <g transform="translate(47 2) scale(.86)">
+    <path fill="url(#body)" d="M190 16C188 64 210 104 256 126C318 148 366 182 388 222C402 206 414 196 432 192C418 214 412 240 420 262C434 278 446 296 454 318C460 306 468 298 480 292C472 318 472 344 472 372C472 470 392 546 270 546C136 546 18 470 18 344C18 268 24 192 50 146C56 172 72 190 92 196C82 160 88 118 110 92C112 116 122 138 140 150C120 100 140 50 190 16Z"/>
+    <ellipse cx="220" cy="282" rx="26" ry="52" transform="rotate(-28 220 282)" fill="#0a0a0a"/>
+    <ellipse cx="346" cy="296" rx="23" ry="46" transform="rotate(-24 346 296)" fill="#0a0a0a"/>
+  </g>
+</svg>

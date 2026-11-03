@@ -17,28 +17,11 @@
   --hot-action: #f47a38;
   --hot-positive: #68d69b;
   --hot-blue: #649af1;
-  --primary: var(--hot-action);
-  --primary-foreground: #21130b;
   --ring: var(--hot-action);
   --accent: #35251f;
   --accent-foreground: #fff0e6;
 }
 .page * { box-sizing: border-box; }
-/* The canonical HOTBOT Button variant owns orange CTA appearance and feedback. */
-.page [data-slot="button"]:not(.crewPoke):not([data-variant="hotbot"]),
-.landingDialog [data-slot="button"]:not([data-variant="hotbot"]) {
-  position: relative;
-  isolation: isolate;
-  cursor: pointer;
-  touch-action: manipulation;
-  transition: transform 360ms cubic-bezier(.2, .9, .25, 1.35), background-color 180ms ease, color 180ms ease, border-color 180ms ease;
-}
-@media (hover: hover) and (pointer: fine) {
-  .page [data-slot="button"]:not(.crewPoke):not([data-variant="hotbot"]):not(:disabled):not([aria-disabled="true"]):hover,
-  .landingDialog [data-slot="button"]:not([data-variant="hotbot"]):not(:disabled):hover { transform: translateY(-2px); }
-}
-.page [data-slot="button"]:not(.crewPoke):not([data-variant="hotbot"]):not(:disabled):not([aria-disabled="true"]):active,
-.landingDialog [data-slot="button"]:not([data-variant="hotbot"]):not(:disabled):active { transform: translateY(1px) scale(.955); transition-duration: 80ms; }
 .page section { scroll-margin-top: 95px; }
 .container { width: min(1180px, calc(100% - 96px)); margin-inline: auto; }
 .section { padding-block: 135px; }
@@ -79,8 +62,11 @@
 .heroCopy .eyebrow { justify-content: center; margin-bottom: 25px; }
 .heroCopy h1 > span { color: var(--hot-brand); }
 .heroDescription { max-width: 540px; margin: 27px auto 0 !important; color: #a6a7b2; font-size: 18px; line-height: 1.6; letter-spacing: -.025em; }
-.heroCapabilities { margin-top: 17px !important; font-size: 12px; color: #8e929f; word-spacing: .5em; }
 .heroActions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 30px; }
+/* The visitor's call to action is the site's primary key with the landing's sheen: a light streak crosses it on hover or focus. It sits under the label, over the key's own fill. */
+.shine::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; background: linear-gradient(110deg, transparent 40%, #fff9 50%, transparent 60%) 180% 0 / 250% 100% no-repeat; transition: background-position var(--dur-slow) cubic-bezier(.2, .65, .3, 1); }
+.shine:focus-visible::before { background-position: -80% 0; }
+@media (hover: hover) { .shine:hover::before { background-position: -80% 0; } }
 /* Phone only; it takes over from the hero and closing buttons once both are off screen. */
 .applyPill { display: none; }
 .crew { position: relative; display: grid; grid-template-columns: 1fr 1fr 1.4fr 1fr 1fr; align-items: end; width: min(1000px, 88%); margin: 18px auto 0; padding: 0 25px 12px; }
@@ -132,6 +118,13 @@
 .contractCopy > svg { width: 13px; height: 13px; }
 .contractCopy[data-copied='true'] { color: var(--hot-positive); }
 .contractAddress { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #7b7e8c; letter-spacing: .02em; }
+.caCheck { margin-top: 80px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px 32px; padding: 30px 34px; border: 1px solid var(--hot-line); border-radius: 18px; background: var(--hot-surface); }
+.caCheck h2 { font-size: clamp(26px, 2.3vw, 33px); }
+.caCheckAddress { display: flex; align-items: center; gap: 14px; min-width: 0; max-width: 100%; padding: 12px 16px; border: 1px solid var(--hot-line); border-radius: 12px; background: #0b0c10; color: #9fa1ad; font: inherit; text-align: left; cursor: pointer; transition: border-color 180ms ease, color 180ms ease; }
+.caCheckAddress:hover { border-color: #ffffff26; color: #cfd1da; }
+.caCheckAddress:focus-visible { outline: 2px solid var(--hot-action); outline-offset: 2px; }
+.caCheckAddress .contractAddress { min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: #c3c5cf; }
+.caCheckAddress .contractCopy { flex: none; }
 .tokenSculpture { display: grid; position: relative; min-width: 0; min-height: 440px; place-items: center; perspective: 1000px; isolation: isolate; }
 .tokenAura { position: absolute; inset: -16% -20%; z-index: -1; pointer-events: none; background: radial-gradient(ellipse at 52% 49%, #f76b202e, #b8370d12 35%, transparent 66%); }
 .tokenSparks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -148,7 +141,7 @@
 }
 .windowBar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; gap: 12px; min-height: 51px; border-bottom: 1px solid #ffffff0b; }
 .windowBrand { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 550; }
-.windowBrand svg { width: 25px; height: 25px; margin-right: 3px; }
+.windowBrand > svg { width: 25px; height: 25px; margin-right: 3px; }
 .productCapture { min-width: 0; margin: 0; overflow: hidden; border: 1px solid #ffffff12; border-radius: 18px; background: #111214; box-shadow: 0 22px 75px #0003; }
 .productCapture img { display: block; width: 100%; height: auto; }
 .conversationCapture { display: flex; flex-direction: column; justify-content: space-between; gap: 48px; padding: 30px 20px 24px; background: linear-gradient(#191919, #0b0b0b); }
@@ -226,7 +219,7 @@
 .teamConnections path { transition: stroke 250ms; }
 .teamConnections [data-active='true'] { stroke: color-mix(in srgb, var(--bot-color) 65%, #252832); }
 .teamCoordinator { position: absolute; left: 0; top: 32%; width: 34%; min-height: 36%; padding: 12px 5px 20px; display: flex; flex-direction: column; align-items: center; border: 1px solid #ffffff16; border-radius: 18px; background: linear-gradient(130deg, #292a30, #191a20); box-shadow: 0 10px 35px #0004; }
-.teamCoordinator svg { width: 80px; height: 80px; margin-top: -13px; }
+.teamCoordinator > svg { width: 80px; height: 80px; margin-top: -13px; }
 .teamCoordinator strong { font-size: 13px; font-weight: 550; letter-spacing: .06em; color: #ffa76e; }
 .teamCoordinator span { margin-top: 6px; color: #92939e; font-size: 10px; }
 .networkJobs { position: absolute; inset: 0 0 0 59%; display: grid; grid-template-rows: repeat(4, 1fr); gap: 0; align-items: center; }
@@ -240,17 +233,6 @@
 .rolePicker [data-slot="button"] { --ring: var(--bot-color); }
 .rolePicker [aria-pressed='true'] { color: var(--bot-color); background: color-mix(in srgb, var(--bot-color) 13%, #111318); }
 .specialistDescription { min-height: 113px; }
-.platformSection { border-top: 1px solid var(--hot-line); border-bottom: 1px solid var(--hot-line); padding: 64px 0; display: grid; grid-template-columns: 1.1fr 1fr; gap: 60px; align-items: center; }
-.platformSection h2 { font-size: 36px; margin-top: 19px; }
-.foundationBrand { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-.foundationBrand .platformBrand { gap: 7px; }
-.foundationBrand .platformBrand > img { width: 42px; height: 42px; }
-.platformSection p:not(.eyebrow) { margin-top: 18px; color: #8b90a0; font-size: 14px; line-height: 1.7; }
-.foundationFeatures { display: flex; flex-direction: column; gap: 23px; border-left: 1px solid var(--hot-line); padding-left: 65px; }
-.foundationFeatures > span { display: flex; align-items: center; gap: 16px; color: #b1b5c3; font-size: 13px; }
-.foundationFeatures svg { width: 19px; height: 19px; color: var(--hot-positive); }
-.foundationFeatures > span:nth-child(2) svg { color: var(--hot-blue); }
-.foundationFeatures > span:nth-child(3) svg { color: var(--hot-action); }
 .finalSection { text-align: center; padding: 145px 0 55px; background: radial-gradient(ellipse at 50% 90%, #363d5112, transparent 48%); }
 .finalSection .eyebrow { justify-content: center; margin-bottom: 24px; }
 .finalSection h2 { font-size: clamp(58px, 5.5vw, 80px); line-height: 1.01; }
@@ -342,7 +324,7 @@
   .applyPill {
     position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 60;
     display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0 24px; border-radius: 999px;
-    background: linear-gradient(180deg, #ffffff2e 0, #ffffff0c 18%, transparent 40%), #f47a38; color: #21130b;
+    background: var(--primary); color: var(--primary-foreground);
     font-size: 13px; font-weight: 650; letter-spacing: .02em; text-decoration: none; white-space: nowrap;
     box-shadow: 0 10px 30px #000a, inset 0 1px 0 #ffffff40;
     opacity: 0; visibility: hidden; transform: translate(-50%, 24px);
@@ -355,6 +337,8 @@
   .crewMember > small { display: none; }
   .heroBottom { width: calc(100% - 40px); margin-top: 29px; padding-block: 21px; font-size: 9px; }
   .tokenSection { margin-top: 55px; grid-template-columns: 1fr; min-height: 0; gap: 8px; padding-block: 24px; }
+  .caCheck { margin-top: 55px; padding: 22px 20px; gap: 16px; }
+  .caCheck h2 { font-size: 24px; }
   .tokenCopy h2 { font-size: 32px; }
   .tokenCopy > p:not(.eyebrow) { font-size: 13px; }
   .tokenCopy .eyebrow { font-size: 9px; }
@@ -386,9 +370,6 @@
   .strategyForm { max-width: 550px; width: 100%; margin-inline: auto; padding: 24px; }
   .orchestratorSection { grid-template-columns: 1fr; gap: 15px; padding-top: 0; }
   .specialistDescription { min-height: 96px; }
-  .platformSection { grid-template-columns: 1fr; gap: 35px; padding-block: 46px; }
-  .platformSection h2 { font-size: 35px; }
-  .foundationFeatures { border-left: 0; padding: 0; gap: 20px; }
   .finalSection { padding-top: 90px; padding-bottom: 32px; }
   .finalSection .eyebrow { font-size: 9px; }
   .finalSection h2 { font-size: 65px; }
@@ -412,7 +393,7 @@
   .networkJob strong { font-size: 10px; }
   .networkJob span { font-size: 8px; }
   .teamCoordinator { top: 29%; padding-bottom: 16px; }
-  .teamCoordinator svg { width: 66px; height: 66px; }
+  .teamCoordinator > svg { width: 66px; height: 66px; }
   .formFields { gap: 19px 12px; }
 }
 @media (max-width: 360px) {

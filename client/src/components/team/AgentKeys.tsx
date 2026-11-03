@@ -1,6 +1,5 @@
 "use client";
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAction, useMutation } from 'convex/react';
 import { Bot, Check, Copy, KeyRound, LoaderCircle, Plug, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,33 +10,28 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { api, useQuery, type Id } from '@/lib/convex';
 import { failToast } from './state';
-import { SettingRow } from './Parts';
+import { Hint, SettingRow } from './Parts';
 import { ago } from './format';
 import s from './team.module.css';
+import { useRouter } from '@/lib/appNavigation';
 
 /** At most this many keys; Convex refuses more (`agentApi/keys` KEYS.max). */
 const MAX_KEYS = 5;
-/** The Agent API's address: Convex's HTTP site beside its client URL (`.convex.cloud` → `.convex.site`; locally the next port). */
-const MCP_URL = (process.env.NEXT_PUBLIC_CONVEX_SITE_URL ?? (process.env.NEXT_PUBLIC_CONVEX_URL ?? '').replace(/\.convex\.cloud\/?$/, '.convex.site')).replace(/\/$/, '') + '/mcp';
+/** The Agent API's address, on Convex's HTTP site. */
+const MCP_URL = (process.env.NEXT_PUBLIC_CONVEX_SITE_URL ?? '').replace(/\/$/, '') + '/mcp';
 
-/** People's own agents (Claude, Codex, Cursor) read and change the team over MCP: with a key made here, or as an app
- *  connected by OAuth sign-in (claude.ai, ChatGPT). Both list here, and deleting either cuts it off. */
 export function AgentKeys() {
   const keys = useQuery(api.agentApi.keys.list, {});
   return <section className={`${s.surface} ${s.accountCard}`} aria-labelledby="agent-keys-title">
     <div className={s.accountCardHead}>
       <span className={s.accountIcon}><Bot size={18}/></span>
-      <div className={s.grow}><h2 id="agent-keys-title">Your agents</h2><small>Claude, ChatGPT, Codex or Cursor runs your team</small></div>
+      <div className={s.grow}><h2 id="agent-keys-title"><Hint text={<>claude.ai, ChatGPT or Muse: add a custom connector with the server address, sign in to HOTBOT and tap Allow.<br/>Claude Code, Codex or Cursor: make a key with New key and paste the line it shows.</>}>Your agents</Hint></h2></div>
       <NewKey full={(keys?.length ?? 0) >= MAX_KEYS}/>
-    </div>
-    <div className={s.steps}>
-      <div className={s.step}><span className={s.stepIcon}><Plug size={14}/></span><b>claude.ai or ChatGPT</b><p>Add a custom connector with the server address below, then sign in to HOTBOT and tap Allow.</p></div>
-      <div className={s.step}><span className={s.stepIcon}><KeyRound size={14}/></span><b>Claude Code, Codex or Cursor</b><p>Make a key with New key and paste the line it shows.</p></div>
     </div>
     <CopyRow label="Server address" text={MCP_URL}/>
     {keys === undefined ? <p className={s.empty}><LoaderCircle className="inline size-4 animate-spin"/></p>
       : keys.length ? <div>{keys.map(key => <SettingRow key={key.id} label={key.name}
-          sub={<>{key.kind === 'app' ? <><Plug className="inline size-3"/> {key.prefix}</> : <code>{key.prefix}…</code>} · {key.lastUsedAt ? `used ${ago(key.lastUsedAt) === 'now' ? 'just now' : ago(key.lastUsedAt) + ' ago'}` : 'never used'}</>}
+          sub={<>{key.kind === 'app' ? <><Plug className="inline size-3"/> {key.prefix}</> : <code>{key.prefix}…</code>} · {key.lastUsedAt ? `used ${ago(key.lastUsedAt) === 'now' ? 'just now' : ago(key.lastUsedAt) + ' ago'}` : 'never used'}{key.expiresAt ? ` · expires in ${ago(Date.now(), key.expiresAt)}` : ''}</>}
           control={<><span className={s.pill} data-tone={key.trade ? 'ember' : undefined}>{key.trade ? 'Trades' : 'Reads'}</span><DeleteKey id={key.id} name={key.name}/></>}/>)}</div>
       : <p className={s.empty}>No agents connected yet. Selling everything and other risky moves always wait for your tap here.</p>}
   </section>;
@@ -46,15 +40,15 @@ export function AgentKeys() {
 /** Makes a key and shows it once, with the line that adds HOTBOT to Claude Code. */
 function NewKey({ full }: { full: boolean }) {
   const create = useAction(api.agentApi.keys.create);
-  const [open, setOpen] = useState(false), [name, setName] = useState('Claude'), [trade, setTrade] = useState(true), [busy, setBusy] = useState(false), [key, setKey] = useState<string | null>(null);
-  function show(next: boolean) { setOpen(next); if (!next) { setKey(null); setName('Claude'); setTrade(true); } }
+  const [open, setOpen] = useState(false), [name, setName] = useState('Claude'), [trade, setTrade] = useState(false), [busy, setBusy] = useState(false), [key, setKey] = useState<string | null>(null);
+  function show(next: boolean) { setOpen(next); if (!next) { setKey(null); setName('Claude'); setTrade(false); } }
   async function make() {
     setBusy(true);
     try { setKey(await create({ name, trade })); } catch (cause) { failToast(cause, { call: 'agentApi.keys.create' }); }
     setBusy(false);
   }
   return <Dialog open={open} onOpenChange={show}>
-    <DialogTrigger asChild><Button size="sm" variant="secondary" disabled={full} title={full ? `You keep up to ${MAX_KEYS} keys` : undefined}><Plus/>New key</Button></DialogTrigger>
+    <DialogTrigger asChild><Button size="sm" variant="outline" disabled={full} title={full ? `You keep up to ${MAX_KEYS} keys` : undefined}><Plus/>New key</Button></DialogTrigger>
     <DialogContent className="sm:max-w-[30rem]" aria-describedby={undefined}>
       {key ? <div className={s.decision}>
         <div className={s.decisionHead}><span className={s.accountIcon}><KeyRound size={18}/></span><span className={s.grow}><DialogTitle asChild><b>Copy your key now</b></DialogTitle><small>HOTBOT shows it only this once</small></span></div>
@@ -116,10 +110,11 @@ export function ConnectAgent() {
   const router = useRouter(), approve = useAction(api.agentApi.oauth.approve);
   // Read once: the address does not change while the dialog is open, and reading it here needs no Suspense boundary.
   const [params] = useState(() => new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search));
-  const clientId = params.get('client_id') ?? '', redirectUri = params.get('redirect_uri') ?? '', state = params.get('state') ?? undefined, scope = (params.get('scope') ?? '').split(/\s+/).filter(Boolean);
+  const clientId = params.get('client_id') ?? '', redirectUri = params.get('redirect_uri') ?? '', state = params.get('state') ?? undefined;
   const wellFormed = params.get('response_type') === 'code' && params.get('code_challenge_method') === 'S256' && /^[A-Za-z0-9_-]{43}$/.test(params.get('code_challenge') ?? '') && Boolean(clientId && redirectUri);
   const app = useQuery(api.agentApi.oauth.client, wellFormed ? { clientId, redirectUri } : 'skip');
-  const [trade, setTrade] = useState(!scope.length || scope.includes('trade')), [busy, setBusy] = useState(false);
+  // Trading is the person's own choice, whatever scope the app asks for.
+  const [trade, setTrade] = useState(false), [busy, setBusy] = useState(false);
   const leave = () => router.replace('/app/account');
   function back(params: Record<string, string>) {
     const url = new URL(redirectUri);
@@ -142,7 +137,7 @@ export function ConnectAgent() {
       </div> : <div className={s.decision}>
         <div className={s.decisionHead}><span className={s.accountIcon}><Plug size={18}/></span><span className={s.grow}><DialogTitle asChild><b>Connect {app.name}?</b></DialogTitle><small>It reads and runs your HOTBOT team</small></span></div>
         <dl className={s.walletBreakdown}>
-          <div><dt>Sends you back to</dt><dd className={app.known ? undefined : s.warnText}>{app.host}</dd></div>
+          <div><dt>Sends you back to</dt><dd className={app.known ? s.fullAddress : `${s.fullAddress} ${s.warnText}`}>{app.host}</dd></div>
           <div><dt>Disconnect</dt><dd>Any time, on Account</dd></div>
         </dl>
         {!app.known && <p className={`${s.accountNote} ${s.warnText}`}>Connect only if you started this in {app.name} yourself. HOTBOT hands access to {app.host}.</p>}

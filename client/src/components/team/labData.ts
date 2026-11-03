@@ -47,28 +47,31 @@ export function useOwnTrades(strategyId?: string | null, limit?: number) {
 }
 
 /** The server Lab's answer to the draft, 150 ms after the last change: the main answer, then the tips (`tips` rows). Only the newest request's
- *  answers are kept, and the previous answer stays while a new one computes (`pending`). */
+ *  answers are kept, and the previous answer stays while a new one computes (`pending`). `error`: why the newest request's main answer or
+ *  tips didn't come. */
 export function useLab(data: LabMeta | undefined, request: (LabRequest & { tips?: TipRow[] }) | null) {
   const id = useRef(0);
   const [main, setMain] = useState<(Extract<LabReply, { kind: 'main' }> & { id: number }) | null>(null), [tips, setTips] = useState<{ id: number; tips: Tip[] } | null>(null), [asked, setAsked] = useState(0);
+  const [failed, setFailed] = useState<{ id: number; error: string } | null>(null);
   const key = request && data ? JSON.stringify(request) : null;
   useEffect(() => {
     if (!key) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       const n = ++id.current, { tips: rows, ...body } = JSON.parse(key) as LabRequest & { tips?: TipRow[] };
+      const fail = (cause: Error) => { if (cause.name === 'AbortError') return; console.error('Lab:', cause.message); if (n === id.current) setFailed({ id: n, error: cause.message }); };
       setAsked(n);
       post<Extract<LabReply, { kind: 'main' }>>({ kind: 'main', ...body }, controller.signal).then(reply => {
         if (n !== id.current) return;
         setMain({ ...reply, id: n });
         if (rows?.length) post<Extract<LabReply, { kind: 'tips' }>>({ kind: 'tips', strategyId: body.strategyId, since: body.since, draft: body.draft, tips: rows }, controller.signal)
-          .then(answer => { if (n === id.current) setTips({ id: n, tips: answer.tips }); }, () => {});
-      }, (cause: Error) => { if (cause.name !== 'AbortError') console.error('Lab:', cause.message); });
+          .then(answer => { if (n === id.current) setTips({ id: n, tips: answer.tips }); }, fail);
+      }, fail);
     }, 150);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [key]);
   const tipMap = useMemo(() => new Map<string, Tip>((tips?.id === main?.id ? tips?.tips ?? [] : []).map(tip => [tip.key, tip])), [tips, main]);
-  return { main, tips: tipMap, pending: !main || main.id !== asked };
+  return { main, tips: tipMap, pending: !main || main.id !== asked, error: failed?.id === asked ? failed.error : null };
 }
 
 export const replayOnLab = (request: CoinRequest, signal?: AbortSignal) => post<CoinAnswer>({ kind: 'coin', ...request }, signal);

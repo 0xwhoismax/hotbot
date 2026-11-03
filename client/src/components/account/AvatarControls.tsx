@@ -65,12 +65,12 @@ export function AvatarControls({ prominent = false }: { prominent?: boolean }) {
     catch (cause) { setNameError(cause instanceof Error ? cause.message : 'Could not update username'); }
     finally { nameLock.current = false; setSaving(false); }
   }
+  const size = prominent ? 'size-[5.2rem]' : 'size-18';
   return <div className={prominent ? s.profileIdentity : "space-y-2"}>
     <div className="flex items-center gap-3">
-      <button type="button" aria-label="Change avatar" disabled={busy} onClick={() => input.current?.click()} className={`${prominent ? s.profileAvatar : ''} group relative size-18 shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>
-        <Avatar className="size-18"><AvatarImage src={profile?.avatar ?? undefined} alt="Profile" /><AvatarFallback>{profile?.username?.charAt(0).toUpperCase() || 'U'}</AvatarFallback></Avatar>
+      <button type="button" aria-label="Change avatar" disabled={busy} onClick={() => input.current?.click()} className={`${prominent ? s.profileAvatar : ''} group relative ${size} shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>
+        <Avatar className={size}><AvatarImage src={profile?.avatar ?? undefined} alt="Profile" /><AvatarFallback>{profile?.username?.charAt(0).toUpperCase() || 'U'}</AvatarFallback></Avatar>
         <span className={`pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-black/30 transition-opacity ${busy ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}>{busy ? <Loader2 className="size-5 animate-spin text-white" /> : <Camera className="size-4 text-white" />}</span>
-      {prominent && <span className={s.avatarCamera}><Camera size={12}/></span>}
       </button>
       <input ref={input} className="hidden" aria-label="Avatar image" type="file" accept="image/*" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = ''; }} />
       <div className="min-w-0 flex-1 space-y-1">{editing ? <form className={prominent ? s.profileNameForm : "flex flex-wrap gap-2"} onSubmit={event => { event.preventDefault(); void saveName(); }}>

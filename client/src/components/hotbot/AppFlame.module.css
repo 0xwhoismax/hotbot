@@ -1,0 +1,29 @@
+/* The app icon's flame, alive. It bobs slowly and blinks always. With no cursor to follow (`data-idle`) it also glances right and up then left with
+   a slight tilt. Each part moves with a different CSS property (`translate`, `rotate`, `scale`, `transform`), so they stack and the drawing's own
+   slant on the eyes stays. */
+.flame { display: block; overflow: visible; }
+.fluid { width: 100%; height: auto; }
+
+.body { transform-box: fill-box; transform-origin: 50% 92%; animation: bob 5.5s ease-in-out infinite; }
+.flame[data-idle="true"] .body { animation: bob 5.5s ease-in-out infinite, tilt 11s ease-in-out infinite; }
+.gaze { transition: transform 160ms ease-out; }
+.flame[data-idle="true"] .glance { animation: glance 11s ease-in-out infinite; }
+.flame[data-rest="left"] { --glance-first: -16px; }
+.eye { transform-box: fill-box; transform-origin: center; animation: blink 6.8s ease-in-out infinite; }
+
+/* Shy: eyes shut while something private shows; the bob goes on. */
+.flame[data-mood="shy"] .eye { animation: none; scale: 1 0.14; }
+
+@keyframes bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -14px; } }
+@keyframes tilt { 0%, 14%, 40%, 62%, 88%, 100% { rotate: 0deg; } 20%, 32% { rotate: 2.5deg; } 68%, 80% { rotate: -2.5deg; } }
+@keyframes glance {
+  0%, 14%, 40%, 62%, 88%, 100% { translate: 0 0; }
+  20%, 32% { translate: var(--glance-first, 16px) -9px; }
+  68%, 80% { translate: -14px -3px; }
+}
+@keyframes blink { 0%, 44%, 48%, 100% { scale: 1 1; } 46% { scale: 1 0.1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .body, .flame[data-idle="true"] .body, .flame[data-idle="true"] .glance, .eye { animation: none; }
+  .gaze { transition: none; }
+}

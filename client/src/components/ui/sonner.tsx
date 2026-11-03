@@ -19,8 +19,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
       duration={1500}
+      expand
       position={mobile ? "top-center" : "bottom-right"}
-      toastOptions={mobile ? { style: { borderRadius: "999px", padding: "0.7rem 1.1rem" } } : undefined}
+      offset={{ top: "0.75rem" }}
       icons={{
         success: <CircleCheckIcon className="size-[1em]" />,
         info: <InfoIcon className="size-[1em]" />,

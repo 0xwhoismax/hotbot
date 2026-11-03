@@ -1,8 +1,8 @@
-/** A person's look for the app, saved on `userSettings.appearance`. Light or dark is next-themes' own choice and stays per device. */
+/** A person's look for the app, saved on `userSettings.appearance`. Light or dark is next-themes' own choice (the device's until picked) and stays per device. */
 /** Sky is the pastel scheme; Mist is the quiet, low-contrast one. */
 export const SCHEMES = ['graphite', 'charcoal', 'stone', 'slate', 'midnight', 'plum', 'ink', 'sky', 'mist'] as const;
 export const SURFACES = ['flat', 'outline', 'raised', 'glass', 'bold', 'soft'] as const;
-export const BACKDROPS = ['plain', 'grain', 'dots', 'grid'] as const;
+export const BACKDROPS = ['plain', 'grain'] as const;
 /** Corner sizes apply from tablet width up; phones keep today's round corners. */
 export const CORNERS = ['sharp', 'crisp', 'soft', 'round'] as const;
 
@@ -12,7 +12,7 @@ export type Backdrop = typeof BACKDROPS[number];
 export type Corners = typeof CORNERS[number];
 export type Appearance = { scheme: Scheme; surface: Surface; backdrop: Backdrop; corners: Corners };
 
-export const DEFAULT_APPEARANCE: Appearance = { scheme: 'graphite', surface: 'flat', backdrop: 'plain', corners: 'crisp' };
+export const DEFAULT_APPEARANCE: Appearance = { scheme: 'mist', surface: 'raised', backdrop: 'grain', corners: 'round' };
 
 const pick = <T extends string>(options: readonly T[], value: unknown, fallback: T): T => options.includes(value as T) ? value as T : fallback;
 

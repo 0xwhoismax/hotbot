@@ -15,18 +15,18 @@ export const SCHEME_OPTIONS: { id: Scheme; label: string; dark: string; light: s
   { id: 'mist', label: 'Mist', dark: 'oklch(0.3 0.014 245)', light: 'oklch(0.95 0.006 220)' },
 ];
 export const SURFACE_OPTIONS: { id: Surface; label: string }[] = [
-  { id: 'flat', label: 'Flat' }, { id: 'outline', label: 'Outline' }, { id: 'raised', label: 'Raised' }, { id: 'glass', label: 'Glass' }, { id: 'bold', label: 'Bold' }, { id: 'soft', label: 'Soft' },
+  { id: 'flat', label: 'Flat' }, { id: 'outline', label: 'Outline' }, { id: 'raised', label: 'Raised' }, { id: 'glass', label: 'Glass' }, { id: 'soft', label: 'Soft' },
 ];
-export const BACKDROP_OPTIONS: { id: Backdrop; label: string }[] = [{ id: 'plain', label: 'Plain' }, { id: 'grain', label: 'Grain' }, { id: 'dots', label: 'Dots' }, { id: 'grid', label: 'Grid' }];
+export const BACKDROP_OPTIONS: { id: Backdrop; label: string }[] = [{ id: 'plain', label: 'Plain' }, { id: 'grain', label: 'Grain' }];
 export const CORNER_OPTIONS: { id: Corners; label: string }[] = [
   { id: 'sharp', label: 'Sharp' }, { id: 'crisp', label: 'Crisp' }, { id: 'soft', label: 'Soft' }, { id: 'round', label: 'Round' },
 ];
 
-/** One-tap looks: each sets every part of the appearance but light or dark. Default is the reset, so it saves nothing. */
-export const LOOK_OPTIONS: { id: string; label: string; appearance: Appearance }[] = [
-  { id: 'default', label: 'Default', appearance: DEFAULT_APPEARANCE },
-  { id: 'arcade', label: 'Arcade', appearance: { scheme: 'sky', surface: 'bold', backdrop: 'grid', corners: 'round' } },
-  { id: 'calm', label: 'Calm', appearance: { scheme: 'mist', surface: 'soft', backdrop: 'plain', corners: 'soft' } },
+/** One-tap looks: each sets the cards and the backdrop. The colour, the corners and light or dark stay as chosen. */
+export const LOOK_OPTIONS: { id: string; label: string; look: Pick<Appearance, 'surface' | 'backdrop'> }[] = [
+  { id: 'default', label: 'Default', look: { surface: DEFAULT_APPEARANCE.surface, backdrop: DEFAULT_APPEARANCE.backdrop } },
+  { id: 'arcade', label: 'Arcade', look: { surface: 'bold', backdrop: 'plain' } },
+  { id: 'calm', label: 'Calm', look: { surface: 'soft', backdrop: 'plain' } },
 ];
 
 export const sameAppearance = (a: Appearance, b: Appearance) => a.scheme === b.scheme && a.surface === b.surface && a.backdrop === b.backdrop && a.corners === b.corners;

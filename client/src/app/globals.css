@@ -54,9 +54,12 @@
    Bare :root and .dark are Graphite. A scheme sets only its core colours below; every other token derives from them once per side. */
 :root {
   /* Motion: three durations for everything that is not a loop or a pulse. Hovers and state changes are fast, movement and fades are normal, large reveals are slow. */
+  --dur-quick: 90ms;
   --dur-fast: 150ms;
   --dur: 250ms;
   --dur-slow: 500ms;
+  /* The overshoot of anything that lifts, pops or lands: buttons, the rating burst. */
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.25, 1.35);
   /* Every fixed corner in the app is multiplied by --r-scale; pills and bars use --r-pill; buttons, fields and tabs --r-control (a pill at their 2.5em height). */
   --r-scale: 1;
   --r-pill: 99px;
@@ -114,6 +117,7 @@
 .dark {
   /* Graphite, dark */
   --page-bg: oklch(0.145 0 0);
+  --background: var(--page-bg);
   --plane: oklch(0.11 0 0);
   --surface-flat: oklch(0.2 0 0);
   --surface-raised: oklch(0.245 0 0);
@@ -143,9 +147,10 @@
   --chart-5: oklch(0.72 0.14 300);
   --raised-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 0 0 1px oklch(0 0 0 / 0.45), 0 0.75rem 1.75rem -0.9rem oklch(0 0 0 / 0.85);
   --soft-shadow: 0 1px 2px oklch(0 0 0 / 0.2), 0 1rem 2.4rem -1.1rem oklch(0 0 0 / 0.55);
-  /* A full-strength light ring glares on a dark page, so the ring dims and the drop goes dark. */
-  --bold-line: color-mix(in oklab, var(--foreground) 55%, transparent);
-  --bold-drop: oklch(0.08 0 0 / 0.8);
+  /* A full-strength light ring glares on a dark page, so the ring dims. A dark drop vanishes into the page, so the drop is a dimmer step
+     of the ring, still lighter than the page. */
+  --bold-line: color-mix(in oklab, var(--foreground) 60%, transparent);
+  --bold-drop: color-mix(in oklab, var(--foreground) 28%, var(--background));
   --grain-opacity: 0.05;
 }
 
@@ -190,12 +195,93 @@ html[data-surface="glass"] {
 html[data-surface="bold"] {
   --border: color-mix(in oklab, var(--foreground) 24%, transparent);
   --input: color-mix(in oklab, var(--foreground) 32%, transparent);
-  --surface-shadow: inset 0 0 0 2px var(--bold-line), 0.2rem 0.2rem 0 var(--bold-drop);
-  --surface-hover: inset 0 0 0 2px var(--bold-line), 0.3rem 0.3rem 0 var(--bold-drop);
+  /* The ring sits outside the box and the drop, spread as wide, runs under it: an inset ring meeting an outer drop leaves a light seam
+     between them in Safari. */
+  --surface-shadow: 0 0 0 2px var(--bold-line), 0.2rem 0.2rem 0 2px var(--bold-drop);
+  --surface-hover: 0 0 0 2px var(--bold-line), 0.3rem 0.3rem 0 2px var(--bold-drop);
 }
 html[data-surface="bold"] [data-variant="floating"] [data-slot="sidebar-inner"] { border-width: 2px; border-color: var(--bold-line); }
 /* Soft: no edge at all; cards float on a wide, faint shadow. */
 html[data-surface="soft"] { --surface-bg: var(--surface-raised); --surface-shadow: var(--soft-shadow); --surface-hover: var(--soft-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 8%, transparent); }
+
+/* Controls and menus follow the card style, so one look reaches every button, picker, chip, dropdown and dialog.
+   `--control-*` is a filled control at rest (secondary and outline buttons, select triggers, chips, segmented tracks); a solid or selected control keeps its own fill and takes only the shadow.
+   `--menu-*` is anything that floats over the page: select and popover menus, dialogs. Colours only, never gradients: Tailwind reads them as background-color. */
+:root {
+  --control-bg: color-mix(in oklab, var(--foreground) 7%, transparent);
+  --control-bg-hover: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --control-shadow: inset 0 0 #0000;
+  --control-shadow-hover: var(--control-shadow);
+  --control-shadow-press: var(--control-shadow);
+  /* The drop under a control at rest, lifted and pressed: none here, a hard drop in the bold look. A control with its own ring (Rate) adds it. */
+  --control-drop: 0 0 #0000;
+  --control-drop-hover: 0 0 #0000;
+  --control-drop-press: 0 0 #0000;
+  /* How a control answers the pointer (ui/button.module.css, and the hand-rolled pills in team.module.css): a lift on hover, a squeeze on press.
+     A solid button (the one action: primary, ember, destructive, Run) has its own shadow at rest, lifted and pressed, so a look can give it depth. */
+  --hover-lift: translateY(-1px);
+  --press-down: translateY(1px) scale(0.97);
+  --solid-shadow: inset 0 0 #0000;
+  --solid-shadow-hover: inset 0 0 #0000;
+  --solid-shadow-press: inset 0 0 #0000;
+  --solid-lift: var(--hover-lift);
+  --solid-press: var(--press-down);
+  /* How a selectable control looks once chosen (a pressed button, a checked tile): one set of tokens, so a theme decides it once.
+     Default: no movement and the control's own shadow. Bold latches it down, like a held-in key. */
+  --selected-lift: none;
+  --selected-lift-hover: var(--hover-lift);
+  --selected-surface-lift: none;
+  --surface-hover-lift: none;
+  --selected-control-shadow: var(--control-shadow);
+  --selected-solid-shadow: var(--solid-shadow);
+  --selected-surface-shadow: var(--surface-shadow);
+  /* Text fields: how a field sits at rest and focused. Bold sinks them into the page, then deepens the well on focus. */
+  --field-bg: var(--control-bg);
+  --field-shadow: var(--control-shadow);
+  --field-shadow-focus: inset 0 0 0 1.5px var(--ring);
+  --glow-mix: 18%;
+  --menu-bg: var(--popover);
+  --menu-shadow: inset 0 0 0 1px var(--border), 0 0.75rem 2rem -1rem oklch(0 0 0 / 0.35);
+  /* A phone's bottom sheet meets the screen's sides and bottom, so it draws only its top edge. */
+  --sheet-shadow: inset 0 1px 0 var(--border), 0 -0.75rem 2rem -1rem oklch(0 0 0 / 0.35);
+}
+html[data-surface="outline"] { --control-bg: transparent; --control-bg-hover: color-mix(in oklab, var(--foreground) 6%, transparent); --control-shadow: inset 0 0 0 1px var(--input); }
+html[data-surface="raised"] { --control-bg: var(--surface-raised); --control-bg-hover: color-mix(in oklab, var(--foreground) 4%, var(--surface-raised)); --control-shadow: var(--raised-shadow); --menu-bg: var(--surface-raised); --menu-shadow: var(--raised-shadow), 0 0.75rem 2rem -1rem oklch(0 0 0 / 0.35); --solid-shadow: var(--control-shadow); --solid-shadow-hover: var(--control-shadow-hover); --solid-shadow-press: var(--control-shadow-press); }
+html[data-surface="glass"] { --control-bg: color-mix(in oklab, var(--foreground) 6%, transparent); --control-bg-hover: color-mix(in oklab, var(--foreground) 10%, transparent); --control-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 6%, transparent); }
+/* Bold (Arcade) makes every control an arcade key: a raised fill, a 1.5px ring (the cards keep 2px) and a hard drop that grows as the key lifts
+   and that the key sinks into when pressed. Solid buttons are the same key in their own fill. Menus are opaque, so the backdrop never shows through a list. */
+html[data-surface="bold"] {
+  --control-bg: var(--surface-raised);
+  --control-bg-hover: color-mix(in oklab, var(--foreground) 5%, var(--surface-raised));
+  --control-drop: 2px 2px 0 var(--bold-drop);
+  --control-drop-hover: 3px 3px 0 var(--bold-drop);
+  --control-drop-press: 0 0 0 var(--bold-drop);
+  --control-shadow: inset 0 0 0 1.5px var(--bold-line), var(--control-drop);
+  --control-shadow-hover: inset 0 0 0 1.5px var(--bold-line), var(--control-drop-hover);
+  --control-shadow-press: inset 0 0 0 1.5px var(--bold-line), var(--control-drop-press);
+  --hover-lift: translate(-1px, -1px);
+  --press-down: translate(2px, 2px);
+  --solid-shadow: var(--control-shadow);
+  --solid-shadow-hover: var(--control-shadow-hover);
+  --solid-shadow-press: var(--control-shadow-press);
+  --solid-lift: var(--hover-lift);
+  --solid-press: var(--press-down);
+  --field-bg: color-mix(in oklab, var(--foreground) 5%, var(--surface-raised));
+  --field-shadow: inset 0 0 0 1.5px var(--bold-line), inset 0 0.15rem 0 color-mix(in oklab, var(--foreground) 13%, transparent);
+  --field-shadow-focus: inset 0 0 0 1.5px var(--bold-line), inset 0 0.3rem 0 color-mix(in oklab, var(--foreground) 17%, transparent);
+  --glow-mix: 0%;
+  --selected-lift: var(--press-down);
+  --selected-lift-hover: var(--press-down);
+  --selected-surface-lift: translate(0.2rem, 0.2rem);
+  --surface-hover-lift: var(--hover-lift);
+  --selected-control-shadow: var(--control-shadow-press);
+  --selected-solid-shadow: var(--solid-shadow-press);
+  --selected-surface-shadow: inset 0 0 0 2px var(--ember);
+  --menu-bg: var(--surface-raised);
+  --menu-shadow: inset 0 0 0 2px var(--bold-line), 0.25rem 0.25rem 0 var(--bold-drop);
+  --sheet-shadow: inset 0 2px 0 var(--bold-line);
+}
+html[data-surface="soft"] { --control-bg: var(--surface-raised); --control-bg-hover: color-mix(in oklab, var(--foreground) 4%, var(--surface-raised)); --control-shadow: 0 1px 2px oklch(0 0 0 / 0.08), 0 0.35rem 0.9rem -0.45rem oklch(0 0 0 / 0.35); --menu-bg: var(--surface-raised); --menu-shadow: var(--soft-shadow); --solid-shadow: var(--control-shadow); --solid-shadow-hover: var(--control-shadow-hover); --solid-shadow-press: var(--control-shadow-press); }
 
 /* Corners apply from tablet width up; phones keep today's round corners. Soft is today's scale. */
 @media (min-width: 48rem) {
@@ -207,8 +293,6 @@ html[data-surface="soft"] { --surface-bg: var(--surface-raised); --surface-shado
 /* The backdrop layer behind every workspace page (AppearanceBackdrop); Plain paints nothing. */
 .hotbot-backdrop { position: fixed; inset: 0; z-index: -10; pointer-events: none; }
 html[data-backdrop="grain"] .hotbot-backdrop { opacity: var(--grain-opacity); background-size: 180px 180px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
-html[data-backdrop="dots"] .hotbot-backdrop { background-size: 20px 20px; background-image: radial-gradient(color-mix(in oklab, var(--foreground) 13%, transparent) 1px, transparent 1.4px); }
-html[data-backdrop="grid"] .hotbot-backdrop { background-size: 24px 24px; background-image: linear-gradient(color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px); }
 
 @layer base {
   /* Desktop density: everything is em/rem, so the root size scales the whole UI; touch sizes stay at 16px. */
@@ -221,238 +305,28 @@ html[data-backdrop="grid"] .hotbot-backdrop { background-size: 24px 24px; backgr
 /* Set by useResizeQuiet while the window width changes: layout follows the window, nothing eases behind it. */
 html[data-resizing] *, html[data-resizing] *::before, html[data-resizing] *::after { transition: none !important; }
 
-/* Saved to the home screen, the page runs under the status bar: scrolled content fades out under the clock instead of showing through it,
-   in the page's own colour (`--page-top`, from AppearanceBackdrop). Zero tall wherever the browser keeps its own bar. */
-body::after { content: ""; position: fixed; inset: 0 0 auto; z-index: 35; height: env(safe-area-inset-top); pointer-events: none; background: linear-gradient(to bottom, var(--page-top, var(--background)) 35%, transparent); }
+/* Saved to the home screen, the page runs under the status bar: scrolled content passes under a solid strip as tall as the status bar and fades
+   out just below it, in the page's own colour (`--page-top`, from AppearanceBackdrop). Zero tall wherever the browser keeps its own bar. */
+body::after { content: ""; position: fixed; inset: 0 0 auto; z-index: 35; height: calc(env(safe-area-inset-top) * 1.25); pointer-events: none; background: linear-gradient(to bottom, var(--page-top, var(--background)) 80%, transparent); }
+
+/* The part of the screen a dialog can use: the visible area (`--vv-top`/`--vv-h` from useVisualViewport: the screen less an on-screen keyboard)
+   less the status bar, and less the home indicator unless a keyboard covers it. A phone's dialog is a sheet standing on `--view-bottom`: the
+   screen's bottom edge, or the keyboard's top while one is up. */
+:root {
+  --view-gap-bottom: max(0px, env(safe-area-inset-bottom) + var(--vv-h, 100dvh) - 100dvh);
+  --view-top: calc(var(--vv-top, 0px) + env(safe-area-inset-top));
+  --view-h: calc(var(--vv-h, 100dvh) - env(safe-area-inset-top) - var(--view-gap-bottom));
+  --view-bottom: calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh));
+}
+/* Without motion a dialog or a sheet fades in place instead of sliding up or zooming. */
+@media (prefers-reduced-motion: reduce) {
+  :is([data-slot=dialog-content], [data-slot=sheet-content]) { --tw-enter-translate-y: 0; --tw-exit-translate-y: 0; --tw-enter-scale: 1; --tw-exit-scale: 1; }
+}
 
 /* No native scrollbars anywhere: areas still scroll, the page uses the dotted rail. */
 * { scrollbar-width: none; }
 ::-webkit-scrollbar { display: none; width: 0; height: 0; }
-.hotbot-canvas { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
-.hotbot-canvas-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; flex-shrink: 0; min-height: 4em; gap: 0.5em 1em; padding: 0.65em 1em; }
-.hotbot-header-leading { display: flex; align-items: center; gap: 0.75em; min-width: 0; flex: 1 1 12em; }
-.hotbot-header-leading > [data-slot=sidebar-trigger] { flex-shrink: 0; }
-.hotbot-canvas-heading { display: flex; align-items: center; gap: 0.65em; min-width: 0; flex: 1; }
-.hotbot-header-parent { max-width: 12em; min-width: 0; flex: 0 1 auto; color: var(--muted-foreground); font-size: 0.875em; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-.hotbot-header-parent:hover { color: var(--foreground); }
-.hotbot-header-parent:focus-visible { outline: 0.125em solid var(--ring); outline-offset: 0.2em; }
-.hotbot-canvas-heading > svg, .hotbot-canvas-heading > [aria-hidden] { flex-shrink: 0; }
-.hotbot-canvas-heading h1 { font-size: 1em; line-height: 1.4; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hotbot-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25em; min-width: 0; max-width: 100%; }
-.hotbot-header-actions [data-slot=select-trigger] { max-width: 15em; }
-.hotbot-canvas-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
-.hotbot-canvas-content { display: flex; flex-direction: column; min-height: 100%; width: 100%; max-width: 52em; margin-inline: auto; padding: 1.25em 1.5em 2em; }
-.hotbot-stream-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.25em; padding: 2em 1em 4em; text-align: center; }
-.hotbot-stream-empty h2 { font-size: clamp(1.15em, 2vw, 1.5em); font-weight: 500; line-height: 1.35; letter-spacing: -0.025em; }
-.hotbot-action-stream { display: flex; flex-direction: column; gap: 1em; margin: 0; padding: 0.75em 0; list-style: none; }
-.hotbot-action { display: grid; grid-template-columns: 2em minmax(0,1fr); align-items: start; gap: 0.85em; }
-.hotbot-action-avatar { padding-top: 0.15em; }
-.hotbot-action-body { min-width: 0; }
-.hotbot-action-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3em 0.75em; margin-bottom: 0.4em; font-size: 0.75em; color: var(--muted-foreground); }
-.hotbot-action-meta > :first-child { font-weight: 500; color: var(--foreground); }
-.hotbot-action-meta time { margin-left: auto; font-variant-numeric: tabular-nums; }
-.hotbot-action-meta a:hover, .hotbot-event-label a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-.hotbot-action-meta a:focus-visible, .hotbot-event-label a:focus-visible { outline: 0.125em solid var(--ring); outline-offset: 0.2em; }
-.hotbot-action-title { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5em 0.8em; }
-.hotbot-action-title > button { font-size: 1em; font-weight: 500; text-align: left; overflow-wrap: anywhere; }
-.hotbot-action-title > button:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-.hotbot-action-title > button:focus-visible { outline: 0.15em solid var(--ring); outline-offset: 0.25em; }
-.hotbot-action-message { font-size: 0.875em; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 0.45em; }
-.hotbot-action-result { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75em; width: fit-content; margin-top: 0.9em; padding: 0.65em 1em; border: 1px solid var(--border); border-radius: calc(0.85em * var(--r-scale)); font-size: 0.8em; }
-.hotbot-action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25em; margin-top: 0.65em; }
-.hotbot-composer-dock { width: 100%; max-width: 52em; flex-shrink: 0; padding: 0.75em 1.5em max(1em, env(safe-area-inset-bottom)); margin-inline: auto; }
-.hotbot-composer { padding: calc(var(--spacing) * 2); border: 1px solid var(--input); border-radius: 1.5em; background: var(--popover); min-width: 0; }
-.hotbot-composer:focus-within { border-color: var(--ring); }
-.hotbot-composer-context { display: flex; justify-content: space-between; align-items: center; gap: 0.5em; padding: 0 0.5em 0.4em; font-size: 0.75em; color: var(--muted-foreground); border-bottom: 1px solid var(--border); }
-.hotbot-composer-context > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hotbot-composer-context strong { color: var(--foreground); font-weight: 500; }
-.hotbot-composer-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.5em; }
-.hotbot-composer-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25em; min-width: 0; }
-.hotbot-composer-tools [data-slot=select-trigger] { max-width: 12em; }
-.hotbot-composer-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; padding: 0.5em; font-size: 0.75em; color: var(--muted-foreground); }
-.hotbot-composer > [role=alert] { padding: 0.5em; }
-.hotbot-team-list { display: grid; }
-.hotbot-team-entry { padding-block: 0.85em; border-bottom: 1px solid var(--border); }
-.hotbot-team-list-row { display: flex; align-items: center; gap: 0.75em; }
-.hotbot-team-bots { display: flex; flex-wrap: wrap; gap: 0.2em; margin-top: 0.5em; }
-.hotbot-team-bots svg { flex-shrink: 0; }
-.hotbot-team-bots [data-slot=button] { max-width: 100%; }
-.hotbot-team-bots a > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hotbot-team-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.85em; }
-.hotbot-team-link h2 { font-size: 0.95em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hotbot-team-link:hover h2 { text-decoration: underline; }
-.hotbot-team-link p { display: flex; align-items: center; gap: 0.5em; margin-top: 0.25em; font-size: 0.75em; color: var(--muted-foreground); }
-.hotbot-portfolio { display: grid; gap: 1.5em; }
-.hotbot-portfolio-values { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1.5em; padding-block: 0.5em 1.5em; border-bottom: 1px solid var(--border); }
-.hotbot-portfolio-values dt { font-size: 0.75em; color: var(--muted-foreground); }
-.hotbot-portfolio-values dd { margin-top: 0.35em; font-size: 1.35em; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-.hotbot-position { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 1em; padding-block: 0.75em; border-bottom: 1px solid var(--border); }
-.hotbot-position-value { text-align: right; font-size: 0.85em; font-variant-numeric: tabular-nums; }
-.hotbot-list-empty { padding: 3em 1em; text-align: center; color: var(--muted-foreground); font-size: 0.875em; }
-.hotbot-history-actions { display: flex; justify-content: center; margin-top: 1.5em; }
-.hotbot-section { min-width: 0; display: grid; align-content: start; gap: 1em; }
-.hotbot-rule-row { display: flex; align-items: center; justify-content: space-between; gap: 1em; width: 100%; text-align: left; padding-block: 1.25em; }
-.hotbot-rule-row:hover { background: var(--accent); }
-.hotbot-rule-row:focus-visible { outline: 0.15em solid var(--ring); outline-offset: 0.2em; }
-.hotbot-agent-row { display: grid; grid-template-columns: 2.5em minmax(0,1fr) auto; align-items: center; gap: 0.75em; padding-block: 1em; }
-.hotbot-form-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,15em),1fr)); gap: 1.25em; }
-.hotbot-facts { display: grid; gap: 0.9em; font-size: 0.85em; }
-.hotbot-facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; }
-.hotbot-facts dt { color: var(--muted-foreground); }
-.hotbot-facts dd { text-align: right; overflow-wrap: anywhere; }
-.hotbot-page { width: 100%; max-width: 76em; min-width: 0; margin-inline: auto; padding: 4em 1.5em 2em; display: flex; flex-direction: column; gap: 1.5em; }
-@media (min-width: 60em) { .hotbot-portfolio-values { grid-template-columns: repeat(4,minmax(0,1fr)); } }
-@media (max-width: 40em) {
-  .hotbot-canvas-header { padding-right: 0.75em; gap: 0.25em; }
-  .hotbot-header-leading { gap: 0.5em; flex-basis: 10em; }
-  .hotbot-header-actions [data-slot=select-trigger] { max-width: 10em; }
-  .hotbot-canvas-content { padding: 0.75em 1em 1.5em; }
-  .hotbot-composer-dock { padding: 0.5em 0.75em max(0.75em, env(safe-area-inset-bottom)); }
-  .hotbot-action { grid-template-columns: 1.75em minmax(0,1fr); gap: 0.5em; }
-  .hotbot-action-meta { gap: 0.3em 0.5em; }
-  .hotbot-action-meta time { margin-left: 0; }
-  .hotbot-team-list-row { flex-wrap: wrap; }
-  .hotbot-team-link { flex-basis: 60%; }
-}
 @media (prefers-reduced-transparency: reduce) { :root { --popover: color-mix(in oklab, var(--background) 98%, var(--foreground)); } .dark { --popover: color-mix(in oklab, var(--background) 95%, var(--foreground)); } }
-
-/* Shared compact workspace, strategy and swap surfaces. */
-.hotbot-sidebar-account { display: flex; flex-direction: column; gap: 0.65em; width: 100%; }
-.hotbot-sidebar-account > button:not([data-size=icon]) { width: 100%; }
-.hotbot-sidebar-account-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; }
-[data-collapsible=icon] .hotbot-sidebar-account { align-items: center; }
-[data-collapsible=icon] .hotbot-sidebar-account-row { flex-direction: column; }
-[data-collapsible=icon] .hotbot-sidebar-theme { justify-content: center; width: 100%; }
-.hotbot-sidebar-theme { display: flex; align-items: center; border-top: 1px solid var(--border); padding-top: 0.5em; margin-top: 0.25em; }
-.hotbot-workspace-layout, .hotbot-workspace-main { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; }
-.hotbot-team-canvas { container: team-workspace / inline-size; }
-.hotbot-team-overview { order: -1; flex: 0 1 auto; min-height: 0; max-height: 45%; overflow-y: auto; overscroll-behavior: contain; margin: 0.5em 1em 0.75em; }
-.hotbot-team-overview-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75em; }
-.hotbot-team-overview-title { font-size: 0.875em; font-weight: 500; color: var(--muted-foreground); }
-.hotbot-team-overview-status { display: block; font-size: 0.75em; margin-top: 0.4em; color: var(--muted-foreground); }
-.hotbot-team-overview-body { display: none; }
-.hotbot-team-overview[data-expanded=true] .hotbot-team-overview-body { display: block; }
-.hotbot-team-overview[data-expanded=true] .hotbot-overview-toggle > svg { transform: rotate(180deg); }
-.hotbot-overview-block + .hotbot-overview-block { margin-top: 1em; padding-top: 1em; border-top: 1px solid var(--border); }
-.hotbot-overview-block h3 { display: flex; align-items: center; gap: 0.5em; color: var(--muted-foreground); font-size: 0.8125em; font-weight: 400; margin-bottom: 0.45em; }
-.hotbot-overview-block h3 > span { margin-left: auto; font-variant-numeric: tabular-nums; }
-.hotbot-overview-numbers { display: grid; gap: 0.85em; }
-.hotbot-overview-numbers > div { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75em; font-size: 0.875em; }
-.hotbot-overview-numbers dt { color: var(--muted-foreground); }
-.hotbot-overview-numbers dt > small { display: block; }
-.hotbot-overview-numbers dd { text-align: right; margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.hotbot-overview-row { display: flex; align-items: center; gap: 0.65em; width: 100%; min-width: 0; padding: 0.65em 0; text-align: left; font-size: 0.875em; border-radius: calc(0.5em * var(--r-scale)); }
-.hotbot-overview-row:hover, .hotbot-overview-row[aria-pressed=true] { background: var(--accent); }
-.hotbot-overview-row:focus-visible { outline: 0.15em solid var(--ring); outline-offset: 0.15em; }
-.hotbot-overview-row[aria-pressed=true] .hotbot-overview-row-copy > strong { text-decoration: underline; text-underline-offset: 0.2em; }
-.hotbot-overview-row-copy { flex: 1; min-width: 0; }
-.hotbot-overview-row-copy > strong, .hotbot-overview-row-copy > small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.hotbot-overview-row-copy > strong { font-weight: 500; }
-.hotbot-overview-row-copy > small { font-size: 0.875em; }
-.hotbot-overview-row-copy > small, .hotbot-overview-row-count, .hotbot-overview-position-value > small { color: var(--muted-foreground); }
-.hotbot-overview-strategy, .hotbot-overview-position { display: flex; align-items: center; gap: 0.3em; }
-.hotbot-overview-strategy > .hotbot-overview-row, .hotbot-overview-position > .hotbot-overview-row { flex: 1; }
-.hotbot-overview-position-value { text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.hotbot-overview-position-value > small { display: block; }
-.hotbot-overview-none { font-size: 0.8125em; color: var(--muted-foreground); padding-top: 0.35em; }
-.hotbot-overview-more > summary { font-size: 0.8125em; color: var(--muted-foreground); padding-block: 0.5em; cursor: pointer; }
-.hotbot-agent-filter { display: flex; align-items: center; gap: 0.5em; flex-shrink: 0; padding: 0.25em 1.5em; max-width: 52em; width: 100%; margin-inline: auto; font-size: 0.875em; }
-.hotbot-agent-filter > span { flex: 1; }
-@container team-workspace (min-width: 68em) {
-  .hotbot-workspace-layout { display: grid; grid-template-columns: minmax(0,1fr) 21em; gap: 1.25em; padding: 0.5em 1.5em 1.5em 0.5em; }
-  .hotbot-team-overview { order: 0; align-self: start; max-height: 100%; margin: 0; }
-  .hotbot-team-overview-body { display: block; }
-  .hotbot-overview-toggle { display: none; }
-  .hotbot-team-canvas .hotbot-composer-dock { padding-bottom: 0; }
-}
-.hotbot-overview-summary { flex: 0 0 auto; max-height: 42dvh; overflow-y: auto; scrollbar-gutter: stable both-edges; }
-.hotbot-overview-inner { max-width: 52em; padding: 0.5em 1.5em 0.75em; margin-inline: auto; }
-.hotbot-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5em 1em; margin-bottom: 0.5em; }
-.hotbot-section-heading h2, .hotbot-section-heading h3 { font-size: 0.875em; font-weight: 600; }
-.hotbot-empty-inline { display: flex; align-items: center; justify-content: space-between; gap: 1em; padding-block: 0.75em; font-size: 0.875em; color: var(--muted-foreground); }
-.hotbot-balance-link { font-size: 0.875em; text-align: right; }
-.hotbot-overview-positions { padding-top: 0.75em; }
-.hotbot-overview-positions .hotbot-position { font-size: 0.875em; }
-.hotbot-overview-positions .hotbot-position:last-child { border-bottom: 0; }
-.hotbot-strategy-row { display: flex; align-items: center; gap: 0.5em; padding-block: 0.7em; border-bottom: 1px solid var(--border); }
-.hotbot-strategy-name { display: flex; align-items: center; gap: 0.65em; min-width: 0; flex: 1; }
-.hotbot-strategy-name > div { min-width: 0; }
-.hotbot-strategy-name h3 { font-size: 0.875em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hotbot-strategy-name:hover h3 { text-decoration: underline; text-underline-offset: 0.2em; }
-.hotbot-strategy-name p { font-size: 0.75em; color: var(--muted-foreground); margin-top: 0.25em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hotbot-state-dot { width: 0.4em; height: 0.4em; flex-shrink: 0; border-radius: 50%; background: var(--muted-foreground); }
-.hotbot-state-dot.active { background: var(--color-emerald-500); }
-.hotbot-strategy-budget { font-size: 0.75em; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hotbot-event-line { display: grid; grid-template-columns: 2em minmax(0,1fr) auto; gap: 0.85em; align-items: start; padding-block: 0.25em; }
-.hotbot-event-dot { width: 0.3em; height: 0.3em; border-radius: 50%; background: var(--muted-foreground); justify-self: center; margin-top: 0.4em; }
-.hotbot-event-line p { font-size: 0.8125em; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
-.hotbot-event-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25em 0.75em; font-size: 0.6875em; color: var(--muted-foreground); margin-bottom: 0.25em; }
-.hotbot-event-label time { margin-left: auto; font-variant-numeric: tabular-nums; }
-.hotbot-history-loading { text-align: center; color: var(--muted-foreground); font-size: 0.75em; }
-.hotbot-timeline-scroll { overflow-anchor: none; }
-.hotbot-money { display: flex; flex-direction: column; gap: 0.2em; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hotbot-money small { font-size: 0.7em; font-weight: 400; color: var(--muted-foreground); letter-spacing: normal; }
-.hotbot-position-strategy { font-size: 0.7em; margin-top: 0.3em; color: var(--muted-foreground); padding-left: 3.7em; }
-.hotbot-position-controls { display: flex; align-items: center; gap: 0.25em; }
-.hotbot-position-value > small { display: block; font-size: 0.75em; margin-top: 0.3em; }
-.hotbot-transaction { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; gap: 1.5em; align-items: center; font-size: 0.875em; padding-block: 1em; border-bottom: 1px solid var(--border); }
-.hotbot-transaction h3 { font-weight: 500; }
-.hotbot-transaction time, .hotbot-transaction-pnl > small { font-size: 0.75em; color: var(--muted-foreground); }
-.hotbot-transaction-pnl { text-align: right; }
-.hotbot-rules-form { display: grid; gap: 1.25em; min-width: 0; }
-.hotbot-strategy-dialog[data-layout=panel] { max-width: min(56em,calc(100% - 2em)); height: min(54em,calc(100dvh - 2em)); }
-.hotbot-rule-section { display: grid; gap: 1em; padding-top: 1.1em; border-top: 1px solid var(--border); min-width: 0; }
-.hotbot-rule-section > h3 { font-size: 0.9em; font-weight: 600; }
-.hotbot-research-rules { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,21em),1fr)); gap: 0 1.5em; }
-.hotbot-research-rule { display: grid; align-content: start; gap: 0.75em; padding-block: 1em; border-bottom: 1px solid var(--border); min-width: 0; }
-.hotbot-research-rule-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5em; min-width: 0; }
-.hotbot-research-rule-heading h4 { font-size: 0.85em; font-weight: 500; }
-.hotbot-research-rule-heading > input { flex: 1 1 10em; min-width: 0; }
-.hotbot-rule-treatment { display: flex; flex-wrap: wrap; gap: 0.35em; font-size: 0.85em; }
-.hotbot-rule-treatment [data-slot=select-trigger] { font-size: inherit; }
-.hotbot-research-rule .hotbot-form-grid { grid-template-columns: repeat(auto-fit,minmax(min(100%,9em),1fr)); gap: 0.75em; }
-.hotbot-token-choices, .hotbot-preset-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; }
-.hotbot-roster-editor { display: grid; gap: 1.5em; }
-.hotbot-roster-editor-heading { display: flex; align-items: center; gap: 0.65em; min-width: 0; }
-.hotbot-roster-editor-heading > input:not([type=color]) { min-width: 0; flex: 1; }
-.hotbot-manual-swap, .hotbot-manual-account { width: 100%; max-width: 44em; margin-inline: auto; padding: 1.75em 1.5em 9em; display: grid; gap: 1.5em; align-content: start; }
-.hotbot-manual-swap[data-empty=true] { justify-items: center; gap: 0.75em; }
-.hotbot-manual-swap[data-empty=true] .hotbot-swap-selection { justify-content: center; }
-.hotbot-swap-prompt { margin: 0; text-align: center; color: var(--muted-foreground); font-size: 0.875em; }
-.hotbot-swap-selection { display: flex; align-items: center; justify-content: space-between; gap: 0.75em; }
-.hotbot-selected-token { min-width: 0; display: flex; align-items: center; gap: 0.65em; }
-.hotbot-selected-token > div { min-width: 0; }
-.hotbot-selected-token h2 { font-size: 1em; font-weight: 600; }
-.hotbot-selected-token p { font-size: 0.75em; color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.hotbot-swap { display: grid; gap: 0.65em; padding: 1em; border: 1px solid var(--border); border-radius: calc(1.5em * var(--r-scale)); background: var(--card); }
-.hotbot-swap-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin-bottom: 0.3em; }
-.hotbot-swap-amount { border: 1px solid var(--border); border-radius: calc(1em * var(--r-scale)); background: var(--accent); padding: 1em; min-width: 0; }
-.hotbot-swap-label { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.35em; font-size: 0.75em; color: var(--muted-foreground); }
-.hotbot-swap-label > label { font-size: inherit; }
-.hotbot-swap-input-row { display: flex; align-items: center; gap: 0.5em; padding-block: 0.5em; }
-.hotbot-swap-input-row > input { min-width: 0; flex: 1; height: 1.75em; background: transparent; border: 0; border-radius: 0.2em; padding: 0; box-shadow: none; font-size: 1.8em; letter-spacing: -0.025em; }
-.hotbot-swap-input-row > output { min-width: 0; flex: 1; font-size: 1.8em; letter-spacing: -0.025em; overflow: hidden; text-overflow: ellipsis; }
-.hotbot-swap-currency { display: flex; align-items: center; flex-shrink: 0; gap: 0.4em; max-width: 50%; font-size: 0.95em; font-weight: 500; overflow-wrap: anywhere; }
-.hotbot-swap-presets { display: flex; flex-wrap: wrap; gap: 0.25em; margin-top: 0.65em; font-size: 0.75em; }
-.hotbot-swap-direction { margin-block: -1em; z-index: 1; border: 1px solid var(--border); border-radius: 50%; background: var(--popover); width: 2em; height: 2em; display: flex; align-items: center; justify-content: center; justify-self: center; }
-.hotbot-swap-direction > svg { width: 1em; height: 1em; }
-.hotbot-swap-estimate { font-size: 0.6875em; color: var(--muted-foreground); }
-.hotbot-swap-advanced { min-width: 0; font-size: 0.875em; }
-.hotbot-swap-advanced > summary { cursor: pointer; padding-block: 0.75em; color: var(--muted-foreground); }
-.hotbot-swap-advanced > :not(summary) { margin-top: 0.75em; }
-@media (max-width: 40em) {
-  .hotbot-overview-inner { padding: 0.5em 1em; }
-  .hotbot-position { gap: 0.65em; grid-template-columns: minmax(0,1fr) auto; }
-  .hotbot-position-controls { grid-column: 1/-1; justify-content: flex-end; }
-  .hotbot-transaction { grid-template-columns: minmax(0,1fr) auto auto; gap: 0.75em; }
-  .hotbot-transaction-pnl { display: none; }
-  .hotbot-event-line { grid-template-columns: 1.5em minmax(0,1fr) auto; gap: 0.5em; }
-  .hotbot-event-label time { margin-left: 0; }
-  .hotbot-manual-swap { padding-top: 1em; }
-  .hotbot-composer-tools [data-slot=select-trigger] { max-width: 10em; }
-}
-
-.hotbot-view-all { display: block; text-align: right; font-size: 0.75em; color: var(--muted-foreground); padding-top: 0.75em; }
 
 /* Sidebar footer account row */
 .hotbot-account { display:flex; align-items:center; gap:0.25rem; width:100%; }
@@ -460,10 +334,14 @@ body::after { content: ""; position: fixed; inset: 0 0 auto; z-index: 35; height
 .hotbot-account-row:hover, .hotbot-account-row[data-active] { background:var(--sidebar-accent); }
 .hotbot-account-name { display:flex; flex-direction:column; min-width:0; line-height:1.25; }
 .hotbot-account-name strong { font-size:0.875rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.hotbot-account-name small { font-size:0.75rem; color:var(--muted-foreground); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.hotbot-account-icons { display:flex; align-items:center; gap:0.1rem; flex-shrink:0; }
+.hotbot-account-icons { display:flex; align-items:center; gap:0.25rem; flex-shrink:0; }
 .hotbot-account-icons [data-slot=button] { border:0; background:transparent; }
 .hotbot-account-icons [data-slot=button]:hover { background:var(--sidebar-accent); }
+/* The bell while a notification that needs the person is unread: warning colour, and a short ring with a slight grow every 20 s. */
+.hotbot-account-icons .hotbot-bell-alert { color:var(--warning); }
+.hotbot-bell-alert svg { transform-origin:50% 10%; animation:bell-ring 20s ease-in-out 2s infinite; }
+@keyframes bell-ring { 0%, 4.5%, 100% { transform:none; } 0.75% { transform:rotate(14deg) scale(1.18); } 1.5% { transform:rotate(-12deg) scale(1.18); } 2.25% { transform:rotate(8deg) scale(1.12); } 3% { transform:rotate(-5deg) scale(1.06); } 3.75% { transform:rotate(2deg); } }
+@media (prefers-reduced-motion: reduce) { .hotbot-bell-alert svg { animation:none; } }
 [data-collapsible=icon] .hotbot-account { flex-direction:column; }
 [data-collapsible=icon] .hotbot-account-row { flex:none; }
 [data-collapsible=icon] .hotbot-account-icons { flex-direction:column; }
@@ -475,15 +353,9 @@ body::after { content: ""; position: fixed; inset: 0 0 auto; z-index: 35; height
 
 /* HOTBOT signature: the ember accent (sparingly: live, HOTBOT, focus) and tabular mono numerals for money. */
 :root { --ember: #f47a38; --font-num: inherit; }
-
-/* Manual trading: wallet & history read like the rest of the product. */
-.hotbot-manual-account h2 { font-size: 0.9375em; font-weight: 600; margin: 0; }
-.hotbot-manual-account > section > p, .hotbot-manual-account p[role=status], .hotbot-manual-account p[role=alert] { font-size: 0.875em; color: var(--muted-foreground); line-height: 1.5; margin: 0; }
-.hotbot-manual-account [data-slot=table] { font-size: 0.875em; }
-.hotbot-manual-account [data-slot=table-head] { font-size: 0.75em; color: var(--muted-foreground); font-weight: 500; }
-.hotbot-manual-account [data-slot=table-row] { border-color: color-mix(in oklab, var(--foreground) 6%, transparent); }
-.hotbot-manual-account [data-slot=input] { border-radius: var(--r-pill); background: color-mix(in oklab, var(--foreground) 4%, transparent); }
-.hotbot-manual-account [data-slot=button] { border-radius: var(--r-pill); }
+/* ResearchBot's white cloud vanishes on a light page, so the light side draws it in silver. */
+:root { --bot-research: oklch(0.8 0.014 265); }
+.dark { --bot-research: #e5e8ef; }
 
 /* Pages measure themselves against the main column, so container queries work on every route. The team panel always keeps its width. */
 #main-content > div { container-type: inline-size; }
@@ -512,3 +384,56 @@ body::after { content: ""; position: fixed; inset: 0 0 auto; z-index: 35; height
 [data-sonner-toast] [data-description] { margin-top: 0.1rem; font-weight: 400; color: var(--muted-foreground); }
 [data-sonner-toast] [data-button] { border-radius: var(--r-pill, 999px); font-weight: 600; }
 [data-sonner-toast] [data-close-button] { background: var(--popover); border-color: var(--border); }
+/* A phone's toasts are pills. */
+@media (max-width: 767px) { [data-sonner-toaster] [data-sonner-toast] { border-radius: var(--r-pill); padding: 0.7rem 1.1rem; } }
+/* A trade (TradeToast): one line as wide as its words behind the coin's face, in the floating menus' fill and edge, so it follows the surface style. */
+[data-sonner-toaster] [data-sonner-toast].trade-toast {
+  left: 0; right: 0; width: fit-content; max-width: 100%; margin-inline: auto;
+  gap: 0.5rem; padding: 0.3rem 0.95rem 0.3rem 0.3rem; border: 0; border-radius: var(--r-pill);
+  font-size: 0.8125rem; white-space: nowrap; background: var(--menu-bg); box-shadow: var(--menu-shadow);
+  transition: transform var(--dur) var(--ease-spring), opacity var(--dur-fast) ease, height var(--dur) ease;
+}
+@media (prefers-reduced-motion: reduce) { [data-sonner-toaster] [data-sonner-toast].trade-toast { transition: none; } }
+[data-sonner-toaster] [data-sonner-toast].trade-toast [data-icon] { width: 1.5rem; height: 1.5rem; margin: 0; background: none; box-shadow: none; }
+[data-sonner-toaster] [data-sonner-toast].trade-toast [data-title] { display: flex; align-items: baseline; gap: 0.35rem; line-height: 1.5rem; font-weight: 500; }
+
+/* Page swap (TeamApp's <ViewTransition name="page">). On a wide screen the leaving page fades, and the arriving page fades and rises. Where
+   MobileNav's tab bar shows, the two pages slide side by side in the direction that TeamApp sets on html[data-nav], like one strip of screens: the
+   leaving page goes out one side as the arriving page comes in from the other, with no fade and no overlap, under the header and tab bar, which stay
+   live and do not move. The rest of the screen swaps at once. A browser without view transitions just swaps. */
+@media (min-width: 48rem) {
+  ::view-transition-old(page) { animation: pageOut var(--dur-fast) ease both; }
+  ::view-transition-new(page) { animation: pageIn var(--dur) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+}
+/* MobileNav's header and tab bar. Named here, outside the CSS module, so the names stay as written. */
+[data-vt="m-top"] { view-transition-name: m-top; }
+[data-vt="m-bar"] { view-transition-name: m-bar; }
+@media (max-width: 47.99rem) {
+  html { --nav-dir: 1; --nav-dur: calc(var(--dur-slow) * 0.8); }
+  html[data-nav="back"] { --nav-dir: -1; }
+  html[data-nav="none"] { --nav-dur: 0s; }
+  ::view-transition-group(page) { animation: none; }
+  ::view-transition-image-pair(page) { isolation: auto; }
+  ::view-transition-old(page) { animation: pageAway var(--nav-dur) cubic-bezier(0.22, 1, 0.36, 1) both; mix-blend-mode: normal; }
+  ::view-transition-new(page) { animation: pageArrive var(--nav-dur) cubic-bezier(0.22, 1, 0.36, 1) both; mix-blend-mode: normal; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+  ::view-transition-old(m-top), ::view-transition-old(m-bar) { display: none; }
+  ::view-transition-group(m-top), ::view-transition-group(m-bar) { z-index: 1; animation: none; }
+  ::view-transition-new(m-top), ::view-transition-new(m-bar) { animation: none; }
+}
+@keyframes pageOut { to { opacity: 0; } }
+@keyframes pageIn { from { opacity: 0; transform: translateY(0.5rem); } }
+@keyframes pageAway { to { transform: translateX(calc(var(--nav-dir) * -100%)); } }
+@keyframes pageArrive { from { transform: translateX(calc(var(--nav-dir) * 100%)); } }
+@media (prefers-reduced-motion: reduce) { ::view-transition-old(page), ::view-transition-new(page) { animation: none; } }
+
+/* The Arcade swatch in the theme picker: the key sinks onto its drop, a shine sweeps across it. */
+.hotbot-arcade-tile { position: relative; overflow: hidden; animation: arcade-key 2.2s var(--ease-spring) infinite; }
+.hotbot-arcade-tile::after { content: ""; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.55) 50%, transparent 65%) -150% 0 / 250% 100% no-repeat; animation: arcade-shine 2.2s ease-in-out infinite; }
+@keyframes arcade-key { 0%, 55%, 100% { transform: none; box-shadow: 2px 2px 0 currentColor; } 70%, 82% { transform: translate(2px, 2px); box-shadow: 0 0 0 currentColor; } }
+@keyframes arcade-shine { 0%, 20% { background-position: -150% 0; } 55%, 100% { background-position: 150% 0; } }
+@media (prefers-reduced-motion: reduce) { .hotbot-arcade-tile, .hotbot-arcade-tile::after { animation: none; } }
+
+/* Fields take the theme's field tokens where a theme sets them (bold: a well that deepens on focus). */
+html[data-surface="bold"] :is([data-slot="input"], [data-slot="textarea"]:not([data-variant="composer"])) { border-color: transparent; background-color: var(--field-bg); box-shadow: var(--field-shadow); transition: box-shadow var(--dur-fast) ease; }
+html[data-surface="bold"] :is([data-slot="input"], [data-slot="textarea"]:not([data-variant="composer"])):focus-visible { box-shadow: var(--field-shadow-focus); }

@@ -6,9 +6,12 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { COINS, EASY_PLANS, MARKETS, STOPS, TOTALS, TRAILS, budgetPatch, easyNameOf, easyPlanName, exitsWith, fixedStop, marketOf, marketPatch, planOf } from '../../../../types/easy';
 import { EXIT_PLANS, TRAIL, trailPct } from '../../../../types/exits';
+import { SUGGEST } from '../../../../types/lab';
+import type { TeamRules } from '../../../../types/hotbot';
 import type { StrategyPatch } from '../../../../types/team';
 import { signedSol } from './format';
 import { QuickPicks, SettingRow, Val, useSpotAttrs } from './Parts';
+import { LossStopRow, PracticeStopRow } from './LossStop';
 import type { SettingsDraft } from './Settings';
 import s from './team.module.css';
 
@@ -28,9 +31,10 @@ function Help({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** Easy: the kind of coin, then the exits and the budget, on the same setting rows Advanced uses. Every row writes the rules
- *  Advanced edits. Entry score and the other research checks live in Advanced. */
-/** `askInRows`: a phone keeps Ask before each buy in the rows; a desktop puts it beside the button (`EasyAsk`). */
-export function EasyEditor({ draft, open, setOpen, askInRows }: { draft: SettingsDraft; open: string | null; setOpen: (key: string | null) => void; askInRows: boolean }) {
+ *  Advanced edits. The research checks live in Advanced. */
+/** `askInRows`: a phone keeps Ask before each buy in the rows; a desktop puts it beside the button (`EasyAsk`). `examples`: the draft's
+ *  example trades, under the coin kinds. */
+export function EasyEditor({ draft, open, setOpen, askInRows, twin = false, examples }: { draft: SettingsDraft; open: string | null; setOpen: (key: string | null) => void; askInRows: boolean; twin?: boolean; examples?: ReactNode }) {
   const { rules, patch, strategy, set } = draft, initial = strategy.rules;
   const market = marketOf(rules);
   const plan = planOf(rules.exits), fixed = fixedStop(rules.exits), trail = trailPct(rules.exits);
@@ -51,6 +55,7 @@ export function EasyEditor({ draft, open, setOpen, askInRows }: { draft: Setting
         <em aria-label={`Risk ${row.risk} of 4, ${row.pace.toLowerCase()}`}>Risk{[1, 2, 3, 4].map(n => <i key={n} data-on={n <= row.risk || undefined}/>)}<span>{row.pace}</span></em>
       </button>; })}
     </div>
+    {examples}
 
     <div className={s.setGroup}>
       <SettingRow id="exitPlan" {...toggle('easyPlan')} label="Take profit" changed={exitsChanged(planOf)} value={<span className={s.valText}>{plan ? easyPlanName(plan) : rules.exits.name ? easyNameOf(rules.exits.name) : 'Custom'}</span>}>
@@ -85,6 +90,8 @@ export function EasyEditor({ draft, open, setOpen, askInRows }: { draft: Setting
         value={<Val editing={open === 'easyCoins'} autoFocus value={coins} kind="count" min={1} max={20} integer steps={[...COINS]} label="Coins at once" onChange={n => set(budgetPatch(total, n))}/>}>
         <QuickPicks options={COINS.map(n => ({ value: n as number, text: String(n) }))} value={coins} onPick={n => set(budgetPatch(total, n))}/>
       </SettingRow>
+      {strategy.mode === 'live' && <LossStopRow draft={draft} {...toggle('easyLossStop')}/>}
+      {strategy.mode === 'paper' && <PracticeStopRow draft={draft} twin={twin} {...toggle('easyPracticeStop')}/>}
       {askInRows && <SettingRow id="askFirst" label="Ask before each buy" changed={changed('askFirst')} control={<Switch variant="accent" checked={rules.mode === 'ask'} aria-label="Ask before each buy" onCheckedChange={checked => set({ askFirst: checked })}/>}/>}
     </div>
   </div>;
@@ -95,35 +102,38 @@ export function EasyAsk({ draft }: { draft: SettingsDraft }) {
   return <label className={s.easyAsk} {...useSpotAttrs('askFirst')}><span>Ask before each buy</span><Switch variant="accent" checked={draft.rules.mode === 'ask'} onCheckedChange={checked => draft.set({ askFirst: checked })}/></label>;
 }
 
-export type Suggestion = { key: string; title: string; gainSol: number; note?: string; patch: StrategyPatch };
+export type Suggestion = { key: string; title: string; change: string; gainSol: number; row: string; patch: (rules: TeamRules) => StrategyPatch };
+/** Why HOTBOT has no idea for the draft: the Lab didn't answer (`inResult`: the result already says so), it is still replaying the last days,
+ *  the draft picked too few coins to judge a change by, or no change it replayed clears `SUGGEST` (`skipped`: the person passed over or
+ *  applied one that did). `days`: what the Lab's data covers, null until it is known. */
+export type NoIdea = { days: number | null } & ({ kind: 'unavailable'; error: string; inResult: boolean } | { kind: 'looking' } | { kind: 'few'; picks: number } | { kind: 'none'; picks: number; steps: number; plans: number; skipped: boolean });
+/** "the last 5 days", or "the last days" before the Lab says how many. */
+export const lastDays = (days: number | null) => days ? `the last ${days} days` : 'the last days';
+/** A replay's window as a label: "Last 5 days". */
+export const lastDaysTitle = (days: number | null) => days ? `Last ${days} days` : 'Last days';
 
-function SuggestionCard({ idea, onApply, onSkip }: { idea: Suggestion; onApply: () => void; onSkip: () => void }) {
-  return <div className={s.easyIdea}>
-    <span><b>{idea.title}</b><small><em className={s.up}>{signedSol(idea.gainSol, 2)}</em>{idea.note ? ` · ${idea.note}` : ''}</small></span>
-    <button type="button" className={s.easyIdeaSkip} aria-label={`Dismiss ${idea.title}`} onClick={onSkip}><X/></button>
-    <Button size="xs" className={s.emberButton} onClick={onApply}>Apply</Button>
+/** Why HOTBOT has no idea, with the bar a change must clear (`SUGGEST`). */
+function NoIdeaNote({ why }: { why: NoIdea }) {
+  if (why.kind === 'unavailable') return <p className={s.labNote}>{why.error}</p>;
+  if (why.kind === 'looking') return <p className={s.labNote} role="status">Looking at {lastDays(why.days)}…</p>;
+  const tried = why.kind === 'none' ? [why.steps ? `${why.steps} rule step${why.steps === 1 ? '' : 's'}` : '', why.plans ? `${why.plans} exit plan${why.plans === 1 ? '' : 's'}` : ''].filter(Boolean) : [];
+  const title = why.kind === 'few' ? 'Needs more coins' : `${why.skipped ? 'No other change' : 'None'} made ${signedSol(SUGGEST.sol, 2)} more often enough`;
+  const line = why.kind === 'few' ? `${why.picks} of ${SUGGEST.picks} picked in ${lastDays(why.days)}` : `${tried.length ? `Tried ${tried.join(' and ')} on` : 'Replayed'} ${why.picks} coins of ${lastDays(why.days)}`;
+  return <div className={s.easyIdea}><span><b>{title}</b><small>{line}</small></span></div>;
+}
+
+/** HOTBOT's ideas as cards, best first (`advanced`: named from → to), or why it has none; nothing when the Lab failed, which the result
+ *  above already says. Apply puts one in the draft; nothing saves until Save. */
+export function Ideas({ ideas, why, advanced, onApply, onSkip }: { ideas: Suggestion[]; why: NoIdea; advanced: boolean; onApply: (idea: Suggestion) => void; onSkip: (idea: Suggestion) => void }) {
+  const spotAttrs = useSpotAttrs('ideas');
+  if (!ideas.length && why.kind === 'unavailable' && why.inResult) return null;
+  return <div className={s.easyIdeas} {...spotAttrs}>
+    {ideas.length ? ideas.map(idea => { const name = advanced ? idea.change : idea.title;
+      return <div key={idea.key} className={s.easyIdea}>
+        <span><b>{name}</b><small><em className={s.up}>{signedSol(idea.gainSol, 2)}</em></small></span>
+        <button type="button" className={s.easyIdeaSkip} aria-label={`Dismiss ${name}`} onClick={() => onSkip(idea)}><X/></button>
+        <Button size="xs" variant="ember" onClick={() => onApply(idea)}>Apply</Button>
+      </div>; }) : <NoIdeaNote why={why}/>}
   </div>;
 }
 
-export function EasyResult({ figure, days }: { figure?: number; days: number }) {
-  return <div className={s.easyResult} {...useSpotAttrs('result')}>
-    {figure === undefined ? <span className={s.editorFigureGhost} role="status" aria-label="Replaying the last days"/>
-      : <b className={`${s.num} ${figure > 0.005 ? s.up : figure < -0.005 ? s.down : s.muted}`}>{signedSol(figure).replace(' SOL', '')}<small>SOL</small></b>}
-    <small>Simulated on the last {days} days of trading</small>
-  </div>;
-}
-
-/** Easy's column beside the rows: the result, HOTBOT's ideas and the one button. */
-export function EasyColumn({ result, ideas, onApply, onSkip, action }: { result: ReactNode; ideas: Suggestion[]; onApply: (idea: Suggestion) => void; onSkip: (idea: Suggestion) => void; action: ReactNode }) {
-  const ideaSpot = useSpotAttrs('ideas');
-  return <aside className={`${s.editorSide} ${s.easySide}`} aria-label="Result and suggestions">
-    {result}
-    {ideas.length > 0 && <div className={s.easyIdeas} {...ideaSpot}><span className={s.easyIdeasHead}><Sparkles/>HOTBOT</span>{ideas.map(idea => <SuggestionCard key={idea.key} idea={idea} onApply={() => onApply(idea)} onSkip={() => onSkip(idea)}/>)}</div>}
-    {action}
-  </aside>;
-}
-
-/** A phone's best idea, pinned above the bottom bar (the tab bar, or the Reset/Save bar while there are changes). */
-export function EasyDock({ ideas, onApply, onSkip }: { ideas: Suggestion[]; onApply: (idea: Suggestion) => void; onSkip: (idea: Suggestion) => void }) {
-  return ideas[0] ? <div className={s.easyDock}><SuggestionCard idea={ideas[0]} onApply={() => onApply(ideas[0])} onSkip={() => onSkip(ideas[0])}/></div> : null;
-}

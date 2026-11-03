@@ -1,10 +1,11 @@
 "use client";
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Check, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { EXIT_PLANS, EXIT_PLAN_GROUPS, SAVED_PLANS, TRAIL, describeExits, exitPlan, exitTrigger, isTrail, namedExitPlan, stopLevel, trailPct, withTrail, withoutTrail, type ExitPlan, type ExitPlanId } from '../../../../types/exits';
+import { EXIT_PLANS, EXIT_PLAN_GROUPS, EXIT_RUNGS, SAVED_PLANS, TRAIL, describeExits, exitPlan, isTrail, namedExitPlan, trailPct, withTrail, withoutTrail, type ExitPlan, type ExitPlanId } from '../../../../types/exits';
+import { FIXED_STOP_MIN_PCT } from '../../../../types/hotbot';
 import { signedSol } from './format';
 import { QuickPicks, SettingRow, Val, minutesText } from './Parts';
 import s from './team.module.css';
@@ -19,7 +20,7 @@ const same = (a: unknown, b: unknown) => stable(a) === stable(b);
 const gainText = (pct: number) => pct % 100 === 0 && pct > 0 ? `${pct / 100 + 1}×` : `+${Math.round(pct)}%`;
 
 const share = (pct: number) => pct >= 100 ? 'all' : `${Math.round(pct)}%`;
-const GAINS = [20, 30, 50, 100, 200, 300, 500], SHARES = [10, 25, 33, 50, 100], MINUTES = [5, 10, 15, 30, 60], TRAILS = [5, 8, 10, 15, 20, 25];
+const GAINS = [20, 30, 50, 100, 200, 300, 500], SHARES = [10, 25, 33, 50, 100], MINUTES = [5, 10, 15, 30, 60], TRAILS = [5, 8, 10, 15, 20, 25, 30, 40];
 const picks = (values: number[], text: (n: number) => string) => values.map(value => ({ value, text: text(value) }));
 
 /** What a plan sells above the trailing stop, in words. */
@@ -43,38 +44,60 @@ export function ExitPlanRows({ plan, initial, onChange, onTrail, open, onOpen, p
   const setStops = (next: Stop[]) => onChange(keep({ ...plan, stopLosses: next }));
   const setStop = (index: number, change: Partial<Stop>) => setStops(stops.map((stop, i) => i === index ? { ...stop, ...change } : stop));
   const setTake = (index: number, change: Partial<TakeProfit>) => onChange({ ...plan, takeProfits: plan.takeProfits.map((tp, i) => i === index ? { ...tp, ...change } : tp) });
-  const sold = plan.takeProfits.reduce((sum, tp) => sum + tp.sellPct, 0);
+  const sold = plan.takeProfits.reduce((sum, tp) => sum + tp.sellPct, 0), stopsFull = plan.stopLosses.length >= EXIT_RUNGS.stopLosses;
   const row = (key: string) => ({ open: open === key, onToggle: () => onOpen(open === key ? null : key) });
+  // Every "Trail once up" step as one ladder: each arms at its gain and trails under the high, then sells its share once (`isTrailStep`) or the rest.
+  const ladder = stops.flatMap((stop, index) => kindOf(stop) === 'armed' ? [{ stop, index }] : []);
+  const distanceOf = (stop: Stop) => stop.trailDistancePct ?? stop.lossPct;
+  const parts = ladder.reduce((sum, { stop }) => sum + (stop.sellPct < 100 ? stop.sellPct : 0), 0), sellsRest = ladder.some(({ stop }) => stop.sellPct >= 100);
+  // A step sells nothing while a trail that sells the rest sits as close or closer whenever it is armed: the trailing stop, or a step that
+  // sells the rest from no higher a gain.
+  const beaten = (stop: Stop) => (on !== undefined && on <= distanceOf(stop))
+    || (stop.sellPct < 100 && ladder.some(({ stop: other }) => other.sellPct >= 100 && other.armAtGainPct! <= stop.armAtGainPct! && distanceOf(other) <= distanceOf(stop)));
+  // A new level doubles the highest gain, trails a step closer than the closest level and sells half, or what the levels leave of the bag.
+  const addLevel = () => {
+    const closest = Math.min(...ladder.map(({ stop }) => distanceOf(stop))), trailAt = [...TRAILS].reverse().find(n => n < closest) ?? closest;
+    const armAtGainPct = Math.min(100_000, 2 * Math.max(...ladder.map(({ stop }) => stop.armAtGainPct!)));
+    setStops([...stops, { lossPct: trailAt, sellPct: Math.min(50, Math.max(SHARES[0], 100 - parts)), trailing: true, trailDistancePct: trailAt, armAtGainPct }]);
+    onOpen(`stop${stops.length}`);
+  };
   const additions: { key: string; label: string; summary: string; next: () => ExitPlan; opens: string; hidden?: boolean }[] = [
-    { key: 'take', label: 'Take profit', summary: 'Sells a share at a gain', hidden: sold >= 100, opens: `tp${plan.takeProfits.length}`, next: () => ({ ...plan, takeProfits: [...plan.takeProfits, { gainPct: plan.takeProfits.length ? Math.max(...plan.takeProfits.map(tp => tp.gainPct)) * 2 : 100, sellPct: Math.min(50, 100 - sold) }] }) },
-    { key: 'armed', label: 'Trail once up', summary: 'Once up 30%, trails 10% under its high', opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 10, sellPct: 100, trailing: true, trailDistancePct: 10, armAtGainPct: 30 }] }) },
-    { key: 'tighten', label: 'Tighten over time', summary: 'After 30 min, trails 10% under its high', opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 10, sellPct: 100, trailing: true, trailDistancePct: 10, afterMinutes: 30 }] }) },
-    { key: 'time', label: 'Time stop', summary: 'Sells at the buy price if not up after 10 min', hidden: stops.some(stop => kindOf(stop) === 'time'), opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 0, sellPct: 100, afterMinutes: 10 }] }) },
-    { key: 'fixed', label: 'Stop under the buy', summary: 'Sells everything 25% under the buy', hidden: stops.some(stop => kindOf(stop) === 'fixed'), opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 25, sellPct: 100 }] }) },
+    { key: 'take', label: 'Take profit', summary: 'Sells a share at a gain', hidden: sold >= 100 || plan.takeProfits.length >= EXIT_RUNGS.takeProfits, opens: `tp${plan.takeProfits.length}`, next: () => ({ ...plan, takeProfits: [...plan.takeProfits, { gainPct: plan.takeProfits.length ? Math.max(...plan.takeProfits.map(tp => tp.gainPct)) * 2 : 100, sellPct: Math.min(50, 100 - sold) }] }) },
+    { key: 'armed', label: 'Trail once up', summary: 'Once up 30%, trails 10% under its high', hidden: stopsFull || ladder.length > 0, opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 10, sellPct: 100, trailing: true, trailDistancePct: 10, armAtGainPct: 30 }] }) },
+    { key: 'tighten', label: 'Tighten over time', summary: 'After 30 min, trails 10% under its high', hidden: stopsFull, opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 10, sellPct: 100, trailing: true, trailDistancePct: 10, afterMinutes: 30 }] }) },
+    { key: 'time', label: 'Time stop', summary: 'Sells at the buy price if not up after 10 min', hidden: stopsFull || stops.some(stop => kindOf(stop) === 'time'), opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 0, sellPct: 100, afterMinutes: 10 }] }) },
+    { key: 'fixed', label: 'Stop under the buy', summary: 'Sells everything 25% under the buy', hidden: stopsFull || stops.some(stop => kindOf(stop) === 'fixed'), opens: `stop${stops.length}`, next: () => keep({ ...plan, stopLosses: [...stops, { lossPct: 25, sellPct: 100 }] }) },
     { key: 'scale', label: 'Scale out', summary: '10% at +20% and at every +10% after', hidden: Boolean(plan.scaleOut), opens: 'scale', next: () => ({ ...plan, scaleOut: { fromPct: 20, stepPct: 10, sellPct: 10 } }) },
     { key: 'lock', label: 'Lock in steps', summary: 'Every +25% it climbs locks in the step below', hidden: Boolean(plan.lockStepPct), opens: 'lock', next: () => ({ ...plan, lockStepPct: 25 }) },
     { key: 'stall', label: 'Sell on a stall', summary: 'Once up 15%, sells after 5 min without a new high', hidden: Boolean(plan.stall), opens: 'stall', next: () => ({ ...plan, stall: { armAtGainPct: 15, minutes: 5 } }) },
   ];
   const deltaText = (id: ExitPlanId) => { const d = planDelta?.(id); return d === undefined ? null : <em className={d > 0.005 ? s.up : d < -0.005 ? s.down : s.muted}>{Math.abs(d) < 0.005 ? '0.00' : signedSol(d, 2).replace(' SOL', '')}</em>; };
 
+  const distanceVal = (stop: Stop, index: number, editing: boolean) => <Val editing={editing} value={distanceOf(stop)} kind="pct" min={1} max={99} steps={TRAILS} label="Trail distance" post="%" onChange={n => setStop(index, { trailDistancePct: n, lossPct: n })}/>;
+  const distancePicks = (stop: Stop, index: number) => <QuickPicks label="Trails" options={picks(TRAILS, n => `${n}%`)} value={distanceOf(stop)} onPick={n => setStop(index, { trailDistancePct: n, lossPct: n })}/>;
+  const remove = (index: number) => { onOpen(null); setStops(stops.filter((_, i) => i !== index)); };
+  const levelRow = (stop: Stop, index: number) => {
+    const key = `stop${index}`, o = open === key, warn = beaten(stop);
+    return <SettingRow key={key} {...row(key)} label={gainText(stop.armAtGainPct!)} sub={warn ? 'A closer trail sells everything first' : undefined} warn={warn} changed={!same(stop, before[index])} onRemove={() => remove(index)}
+      value={<>{o && <><Val editing autoFocus pre="+" value={stop.armAtGainPct!} kind="pct" min={1} max={100_000} steps={GAINS} label="Arms at a gain of" post="%" onChange={n => setStop(index, { armAtGainPct: n })}/> · </>}
+        trails {distanceVal(stop, index, o)} · sells {o ? <Val editing value={stop.sellPct} kind="pct" min={1} max={100} steps={SHARES} label="Share of the bag sold" post="%" onChange={n => setStop(index, { sellPct: n })}/> : stop.sellPct >= 100 ? 'the rest' : share(stop.sellPct)}</>}>
+      <QuickPicks label="Once up" options={picks(GAINS, gainText)} value={stop.armAtGainPct!} onPick={n => setStop(index, { armAtGainPct: n })}/>
+      {distancePicks(stop, index)}
+      <QuickPicks label="Sells" options={picks(SHARES, n => n >= 100 ? 'The rest' : `${n}%`)} value={stop.sellPct} onPick={n => setStop(index, { sellPct: n })}/>
+    </SettingRow>;
+  };
   const stopRow = (stop: Stop, index: number) => {
-    const kind = kindOf(stop), key = `stop${index}`, o = open === key, changed = !same(stop, before[index]), remove = () => { onOpen(null); setStops(stops.filter((_, i) => i !== index)); };
-    const distance = <Val editing={o} value={stop.trailDistancePct ?? stop.lossPct} kind="pct" min={1} max={99} steps={TRAILS} label="Trail distance" post="%" onChange={n => setStop(index, { trailDistancePct: n, lossPct: n })}/>;
-    const distancePicks = <QuickPicks label="Trails" options={picks(TRAILS, n => `${n}%`)} value={stop.trailDistancePct ?? stop.lossPct} onPick={n => setStop(index, { trailDistancePct: n, lossPct: n })}/>;
-    if (kind === 'armed') return <SettingRow key={key} id="armedTrail" {...row(key)} label="Trail once up" sub="Trails under its high once it reaches the gain" changed={changed} onRemove={remove}
-      value={<><Val editing={o} autoFocus pre="+" value={stop.armAtGainPct!} kind="pct" min={1} max={100_000} steps={[15, 20, 30, 50, 100]} label="Arms at a gain of" post="%" onChange={n => setStop(index, { armAtGainPct: n })}/> · {distance}</>}>
-      <QuickPicks label="Once up" options={picks([15, 20, 30, 50, 100], n => `+${n}%`)} value={stop.armAtGainPct!} onPick={n => setStop(index, { armAtGainPct: n })}/>{distancePicks}
+    const kind = kindOf(stop), key = `stop${index}`, o = open === key, changed = !same(stop, before[index]);
+    if (kind === 'tighten') return <SettingRow key={key} id="tighten" {...row(key)} label="Tighten over time" sub="Trails closer under its high after a while" changed={changed} onRemove={() => remove(index)}
+      value={<><Val editing={o} autoFocus value={stop.afterMinutes!} kind="min" min={1} max={1440} integer steps={MINUTES} label="Tightens after" onChange={n => setStop(index, { afterMinutes: n })}/> · {distanceVal(stop, index, o)}</>}>
+      <QuickPicks label="After" options={picks(MINUTES, n => minutesText(n))} value={stop.afterMinutes!} onPick={n => setStop(index, { afterMinutes: n })}/>{distancePicks(stop, index)}
     </SettingRow>;
-    if (kind === 'tighten') return <SettingRow key={key} id="tighten" {...row(key)} label="Tighten over time" sub="Trails closer under its high after a while" changed={changed} onRemove={remove}
-      value={<><Val editing={o} autoFocus value={stop.afterMinutes!} kind="min" min={1} max={1440} integer steps={MINUTES} label="Tightens after" onChange={n => setStop(index, { afterMinutes: n })}/> · {distance}</>}>
-      <QuickPicks label="After" options={picks(MINUTES, n => minutesText(n))} value={stop.afterMinutes!} onPick={n => setStop(index, { afterMinutes: n })}/>{distancePicks}
-    </SettingRow>;
-    if (kind === 'time') return <SettingRow key={key} id="timeStop" {...row(key)} label={stop.lossPct ? 'Sell if down after' : 'Sell if not up after'} sub={stop.lossPct ? `Sells if ${stop.lossPct}% under the buy by then` : 'Sells at the buy price'} changed={changed} onRemove={remove}
+    if (kind === 'time') return <SettingRow key={key} id="timeStop" {...row(key)} label={stop.lossPct ? 'Sell if down after' : 'Sell if not up after'} sub={stop.lossPct ? `Sells if ${stop.lossPct}% under the buy by then` : 'Sells at the buy price'} changed={changed} onRemove={() => remove(index)}
       value={<Val editing={o} autoFocus value={stop.afterMinutes!} kind="min" min={1} max={1440} integer steps={MINUTES} label="Checks after" onChange={n => setStop(index, { afterMinutes: n })}/>}>
       <QuickPicks options={picks(MINUTES, n => minutesText(n))} value={stop.afterMinutes!} onPick={n => setStop(index, { afterMinutes: n })}/>
     </SettingRow>;
-    return <SettingRow key={key} id="stopLoss" {...row(key)} label="Stop under the buy" sub="Sells everything this far under the buy" changed={changed} onRemove={remove}
-      value={<><Val editing={o} autoFocus pre="−" value={stop.lossPct} kind="pct" min={1} max={99} steps={[10, 15, 20, 25, 30, 40]} label="Under the buy by" post="%" onChange={n => setStop(index, { lossPct: n })}/></>}>
+    return <SettingRow key={key} id="stopLoss" {...row(key)} label="Stop under the buy" sub="Sells everything this far under the buy" changed={changed} onRemove={() => remove(index)}
+      value={<><Val editing={o} autoFocus pre="−" value={stop.lossPct} kind="pct" min={FIXED_STOP_MIN_PCT} max={99} steps={[10, 15, 20, 25, 30, 40]} label="Under the buy by" post="%" onChange={n => setStop(index, { lossPct: n })}/></>}>
       <QuickPicks options={picks([10, 15, 20, 25, 30, 40], n => `−${n}%`)} value={stop.lossPct} onPick={n => setStop(index, { lossPct: n })}/>
     </SettingRow>;
   };
@@ -110,7 +133,18 @@ export function ExitPlanRows({ plan, initial, onChange, onTrail, open, onOpen, p
         <QuickPicks label="Sells" options={picks(SHARES, n => n >= 100 ? 'All' : `${n}%`)} value={tp.sellPct} onPick={n => setTake(index, { sellPct: n })}/>
         <QuickPicks label="When" options={[{ value: 0, text: 'At once' }, ...picks([10, 15, 20, 30], n => `On a ${n}% pullback`)]} value={tp.pullbackPct ?? 0} onPick={n => setTake(index, { pullbackPct: n || undefined })}/>
       </SettingRow>; })}
-    {stops.map(stopRow)}
+    {ladder.length > 0 && <>
+      <SettingRow id="armedTrail" label="Trail once up" changed={ladder.some(({ stop, index }) => !same(stop, before[index])) || ladder.length !== before.filter(stop => kindOf(stop) === 'armed').length}
+        onRemove={() => { onOpen(null); setStops(stops.filter(stop => kindOf(stop) !== 'armed')); }}
+        value={<><span className={s.ladderBar} role="img" aria-label={`${ladder.length} ${ladder.length > 1 ? 'levels sell' : 'level sells'} ${sellsRest || parts >= 100 ? 'the whole bag' : `${parts}% of the bag`}`}>
+          {ladder.map(({ stop, index }) => stop.sellPct < 100 && <i key={index} style={{ flexGrow: stop.sellPct }}/>)}{parts < 100 && <i data-rest={sellsRest ? 'sold' : 'kept'} style={{ flexGrow: 100 - parts }}/>}
+        </span><span className={s.valText}>{sellsRest || parts >= 100 ? 'sells all' : `sells ${parts}%`}</span></>}/>
+      <div className={s.setParams}>
+        {ladder.map(({ stop, index }) => levelRow(stop, index))}
+        {!stopsFull && <SettingRow add label="Add a level" onToggle={addLevel}/>}
+      </div>
+    </>}
+    {stops.map((stop, index) => kindOf(stop) === 'armed' ? null : stopRow(stop, index))}
     {plan.scaleOut && <SettingRow id="scaleOut" {...row('scale')} label="Scale out" sub={`From +${plan.scaleOut.fromPct}%`} changed={!same(plan.scaleOut, initial.scaleOut)} onRemove={() => { onOpen(null); onChange({ ...plan, scaleOut: undefined }); }}
       value={<><Val editing={open === 'scale'} value={plan.scaleOut.sellPct} kind="pct" min={1} max={100} steps={[5, 10, 20, 25]} label="Share sold each step" post="%" onChange={n => onChange({ ...plan, scaleOut: { ...plan.scaleOut!, sellPct: n } })}/> every <Val editing={open === 'scale'} pre="+" value={plan.scaleOut.stepPct} kind="pct" min={1} max={1000} steps={[5, 10, 20, 50]} label="Step between sells" post="%" onChange={n => onChange({ ...plan, scaleOut: { ...plan.scaleOut!, stepPct: n } })}/></>}>
       <QuickPicks label="From" options={picks([10, 20, 30, 50, 100], n => `+${n}%`)} value={plan.scaleOut.fromPct} onPick={n => onChange({ ...plan, scaleOut: { ...plan.scaleOut!, fromPct: n } })}/>
@@ -142,82 +176,4 @@ function SavePlan({ suggested, taken, onSave }: { suggested: string; taken: stri
     <Input autoFocus value={name} maxLength={SAVED_PLANS.nameLength} placeholder="Name this plan" aria-label="Plan name" onChange={event => setName(event.target.value)}/>
     <Button type="submit" size="sm" disabled={!clean || saving}>{replaces ? 'Replace' : 'Save'}</Button>
   </form>;
-}
-
-type Point = { t: number; p: number };
-type Mark = { t: number; p: number; take: boolean; label: string };
-/** One made-up coin run through the real exit evaluator (exitTrigger and stopLevel, the code the worker sells with): it climbs past the plan's
- *  levels, then falls. What it draws is what the engine would do to that coin: the stop that follows it, each sell and when the bag is gone. */
-function simulate(plan: ExitPlan) {
-  const cues = [...plan.takeProfits.map(tp => tp.gainPct), ...plan.stopLosses.flatMap(stop => stop.armAtGainPct ? [stop.armAtGainPct] : []), plan.stall?.armAtGainPct ?? 0, (plan.scaleOut?.fromPct ?? 0) * 1.6, (plan.lockStepPct ?? 0) * 2.6].filter(g => g > 0 && g <= 400);
-  const peak = Math.max(40, Math.min(320, (cues.length ? Math.max(...cues) : 50) * 1.2)) / 100;
-  const times = [...plan.stopLosses.flatMap(stop => stop.afterMinutes ? [stop.afterMinutes] : []), (plan.stall?.minutes ?? 0) * 3];
-  const span = Math.max(30, Math.min(240, Math.max(0, ...times) * 1.7)), steps = 180;
-  const gain = (u: number) => u <= 0.5 ? peak * Math.sin(Math.PI / 2 * u / 0.5) ** 1.15 + 0.06 * peak * Math.sin(u * 29) * u : peak - (peak + 0.5) * ((u - 0.5) / 0.5) ** 1.6 + 0.04 * peak * Math.sin(u * 23) * (1 - u);
-  const path: Point[] = [], stop: Point[] = [], marks: Mark[] = [];
-  let high = 1, highAt = 0, rungs = 0, left = 100, soldAt = span;
-  for (let i = 0; i <= steps; i++) {
-    const t = span * i / steps, p = 1 + gain(i / steps);
-    path.push({ t, p });
-    if (left <= 0) continue;
-    if (p > high) { high = p; highAt = t; }
-    const state = { entryPriceUsd: 1, highUsd: high, rungs, heldMs: t * 60_000, sinceHighMs: (t - highAt) * 60_000 };
-    const level = stopLevel(plan, state).level;
-    if (level > 0) stop.push({ t, p: level });
-    const hit = exitTrigger(plan, state, p);
-    if (!hit) continue;
-    const name = hit.reason.split(':')[0];
-    if (hit.rung !== undefined) { rungs = hit.rung + 1; const share = Math.min(left, hit.sellPct); left -= share; marks.push({ t, p: hit.atUsd ?? p, take: true, label: left <= 0 ? `Sold all at ${gainText(((hit.atUsd ?? p) - 1) * 100)}` : `Sold ${Math.round(share)}%` }); }
-    else { left = 0; marks.push({ t, p: hit.atUsd ?? p, take: false, label: name === 'Took profit' ? 'Sold the rest' : name }); }
-    if (left <= 0) soldAt = t;
-  }
-  return { path, stop, marks, soldAt, span };
-}
-
-const L = 44, R = 14, TOP = 14, BOTTOM = 24;
-/** The plan as a picture: one coin's price (white until the bag is gone, faint after), the stop following it in ember, take-profit levels in green,
- *  the minutes timed rules wait for, and a dot with its reason at every sell. */
-export function ExitGraph({ plan }: { plan: ExitPlan }) {
-  // Drawn at its real width, so labels keep their size from a phone to a wide column.
-  const [box, setBox] = useState<SVGSVGElement | null>(null), [W, setW] = useState(560);
-  useLayoutEffect(() => {
-    if (!box) return;
-    const measure = () => setW(Math.max(260, Math.round(box.getBoundingClientRect().width)));
-    const observer = new ResizeObserver(measure);
-    observer.observe(box);
-    measure();
-    return () => observer.disconnect();
-  }, [box]);
-  const H = Math.round(Math.min(210, Math.max(160, W * 0.3)));
-  const key = JSON.stringify(plan);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- the plan's JSON is its identity; the board hands a new object on every update.
-  const sim = useMemo(() => simulate(plan), [key]);
-  // After the last sell the coin carries on faintly for a short while, so the picture shows what the plan stepped away from.
-  const drawn = sim.path.filter(point => point.t <= sim.soldAt + sim.span * 0.25), after = drawn.filter(point => point.t >= sim.soldAt);
-  const peak = Math.max(...drawn.map(point => point.p));
-  const levels = plan.takeProfits.map(tp => 1 + tp.gainPct / 100);
-  const top = Math.max(peak, ...levels.filter(level => level <= peak * 1.5)) * 1.06 - 0.06;
-  const bottom = Math.min(...drawn.map(point => point.p), ...sim.stop.map(point => point.p), 1) - 0.08;
-  const end = Math.max(...drawn.map(point => point.t)), x = (t: number) => L + (W - L - R) * t / end, y = (p: number) => TOP + (H - TOP - BOTTOM) * (top - Math.min(top, p)) / (top - bottom);
-  const line = (points: Point[]) => points.map((point, i) => `${i ? 'L' : 'M'}${x(point.t).toFixed(1)} ${y(point.p).toFixed(1)}`).join(' ');
-  const timed = [...new Set(plan.stopLosses.flatMap(stop => stop.afterMinutes && stop.afterMinutes < end ? [stop.afterMinutes] : []))];
-  return <svg ref={setBox} className={s.exitGraph} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`What the plan does to a coin that climbs and falls back: ${describeExits(plan)}`}>
-    <line className={s.gBuy} x1={L} x2={W - R} y1={y(1)} y2={y(1)}/>
-    <text className={s.gAxis} x={0} y={y(1) + 4}>Buy</text>
-    {levels.map((level, i) => <g key={i} className={s.gTake}>
-      <line x1={L} x2={W - R} y1={y(level)} y2={y(level)}/>
-      <text x={0} y={y(level) + 4}>{level > top ? '↑ ' : ''}{gainText((level - 1) * 100)}</text>
-    </g>)}
-    {timed.map(minutes => <g key={minutes} className={s.gTime}>
-      <line x1={x(minutes)} x2={x(minutes)} y1={TOP} y2={H - BOTTOM}/>
-      <text x={x(minutes) + 5} y={H - 6}>{minutes < 60 ? `${minutes} min` : `${+(minutes / 60).toFixed(1)} h`}</text>
-    </g>)}
-    {after.length > 1 && <path className={s.gAfter} d={line(after)}/>}
-    <path className={s.gPath} d={line(sim.path.filter(point => point.t <= sim.soldAt))}/>
-    {sim.stop.length > 1 && <path className={s.gStop} d={line(sim.stop)}/>}
-    {sim.marks.slice(0, 4).map((mark, i) => <g key={i} className={mark.take ? s.gTakeMark : s.gStopMark}>
-      <circle cx={x(mark.t)} cy={y(mark.p)} r={4.5}/>
-      <text x={x(mark.t) > W - 150 ? x(mark.t) - 8 : x(mark.t) + 8} y={y(mark.p) + (mark.take ? -9 : 16)} textAnchor={x(mark.t) > W - 150 ? 'end' : 'start'}>{mark.label}</text>
-    </g>)}
-  </svg>;
 }

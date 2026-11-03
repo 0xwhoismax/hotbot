@@ -1,38 +1,95 @@
-/* Colour and feedback only; Button's base classes own pill geometry and type. */
-.default {
+/* Colour and feedback only; Button's base classes own pill geometry and type.
+   `.feel` is the one answer every variant gives the pointer: a lift on hover, a squeeze on press, timed by the motion tokens (globals.css).
+   `.solid` adds the depth of a filled button: `--solid-shadow` at rest, lifted and pressed, which a bold look turns into a key that sinks. */
+.feel {
   cursor: pointer;
   touch-action: manipulation;
-  transition: transform 240ms cubic-bezier(.2, .9, .25, 1.35), background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  transition: transform var(--dur) var(--ease-spring), background-color var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
+.solid { box-shadow: var(--solid-shadow); }
+/* The same three shadow slots at rest, hovered and pressed, so the transition pairs ring with ring and drop with drop. Tailwind's `shadow-[]` composes a longer list that mis-pairs and flickers the ring. */
+.quiet { box-shadow: var(--control-shadow), var(--quiet-ring, inset 0 0 #0000); }
+/* The lift moves the button 1px, so a pointer on its edge would leave and re-enter it in a loop. This halo moves with the button and keeps the edge hovered. */
+:where(.feel:not(:disabled):not(.absolute):not(.fixed):not(.sticky)) { position: relative; isolation: isolate; }
+.feel:not(:disabled)::after { content: ""; position: absolute; inset: -3px; z-index: -1; border-radius: inherit; }
 @media (hover: hover) and (pointer: fine) {
-  .default:not(:disabled):not([aria-disabled="true"]):hover {
-    transform: translateY(-.12em);
-    box-shadow: 0 .35em 1em color-mix(in oklab, var(--primary) 18%, transparent);
+  /* A layer only while hovered, so the icon is not re-rasterized when the lift ends (the snap). A button that keeps a layer at rest draws
+     its text as a bitmap, and a chosen button's offset puts that bitmap between pixels, which blurs it on a 100% display. */
+  .feel:not(:disabled):not([aria-disabled="true"]):hover { will-change: transform; backface-visibility: hidden; transform: var(--hover-lift); }
+  /* An icon button holds its layer at rest, as the team panel's round controls do: a neighbour's hover then never moves it to a new layer, and its glyph stays still. */
+  .still { will-change: transform; backface-visibility: hidden; }
+  /* In fast and ease out, so the key answers the pointer at once; leaving keeps the softer base timing. */
+  .feel:not(:disabled):not([aria-disabled="true"]):hover { transition-duration: var(--dur-quick); transition-timing-function: ease-out; }
+  .solid:not(:disabled):not([aria-disabled="true"]):hover {
+    transform: var(--solid-lift);
+    box-shadow: var(--solid-shadow-hover), 0 .35em 1em color-mix(in oklab, var(--glow, var(--primary)) var(--glow-mix), transparent);
   }
 }
-.default:not(:disabled):not([aria-disabled="true"]):focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 3px;
+.feel:not(:disabled):not([aria-disabled="true"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
-.default:not(:disabled):not([aria-disabled="true"]):active {
-  transform: translateY(.05em) scale(.97);
-  box-shadow: none;
-  transition-duration: 80ms;
+.feel:not(:disabled):not([aria-disabled="true"]):active {
+  transform: var(--press-down);
+  transition-duration: calc(var(--dur-fast) / 2);
 }
+.solid:not(:disabled):not([aria-disabled="true"]):active {
+  transform: var(--solid-press);
+  box-shadow: var(--solid-shadow-press);
+}
+/* Chosen: the theme's selected tokens (globals.css), held through hover. */
+.feel:not(:disabled):not([aria-disabled="true"]):is([aria-pressed="true"], [aria-checked="true"], [data-state="on"]) { transform: var(--selected-lift); }
+.quiet:not(:disabled):not([aria-disabled="true"]):is([aria-pressed="true"], [aria-checked="true"], [data-state="on"]) { box-shadow: var(--selected-control-shadow), var(--quiet-ring, inset 0 0 #0000); }
+.solid:not(:disabled):not([aria-disabled="true"]):is([aria-pressed="true"], [aria-checked="true"], [data-state="on"]) { box-shadow: var(--selected-solid-shadow); }
+:global(html) .ghost:not(:disabled):is([aria-pressed="true"], [aria-checked="true"], [data-state="on"]) { box-shadow: var(--selected-control-shadow); }
+@media (hover: hover) and (pointer: fine) {
+  .feel:not(:disabled):not([aria-disabled="true"]):is([aria-pressed="true"], [aria-checked="true"], [data-state="on"]):hover { transform: var(--selected-lift-hover); }
+  .quiet:not(:disabled):not([aria-disabled="true"]):is([aria-pressed="true"], [aria-checked="true"], [data-state="on"]):hover { box-shadow: var(--selected-control-shadow), var(--quiet-ring, inset 0 0 #0000); }
+  .solid:not(:disabled):not([aria-disabled="true"]):is([aria-pressed="true"], [aria-checked="true"], [data-state="on"]):hover { box-shadow: var(--selected-solid-shadow); }
+}
+/* `.quiet` is a filled or outlined control (secondary, outline, a dropdown's trigger): its shadow follows the press too, so a bold look's key
+   lifts and sinks like a solid one. `--quiet-ring` keeps an outline's own edge. Ghost buttons become keys only in the bold look. */
+@media (hover: hover) and (pointer: fine) {
+  .quiet:not(:disabled):not([aria-disabled="true"]):hover { box-shadow: var(--control-shadow-hover), var(--quiet-ring, inset 0 0 #0000); }
+}
+.quiet:not(:disabled):not([aria-disabled="true"]):active { box-shadow: var(--control-shadow-press), var(--quiet-ring, inset 0 0 #0000); }
+/* `tone`: the key's edge and its pressed fill in a meaning's colour, through the same shadow tokens every quiet button reads. */
+.quiet[data-key-tone="positive"] { --tone: var(--positive); }
+.quiet[data-key-tone="destructive"] { --tone: var(--destructive); }
+.quiet[data-key-tone="ember"] { --tone: var(--ember); }
+.quiet[data-key-tone] {
+  --edge: color-mix(in oklab, var(--tone) 45%, transparent);
+  --control-shadow: inset 0 0 0 1.5px var(--edge), var(--control-drop);
+  --control-shadow-hover: inset 0 0 0 1.5px var(--tone), var(--control-drop-hover);
+  --control-shadow-press: inset 0 0 0 1.5px var(--tone), var(--control-drop-press);
+  --selected-control-shadow: var(--control-shadow-press);
+}
+.quiet[data-key-tone] svg { color: var(--tone); }
+:global(:root) .quiet[data-key-tone]:is([aria-pressed="true"], [data-state="set"]) { --edge: var(--tone); background-color: color-mix(in oklab, var(--tone) 14%, var(--control-bg)); }
+/* `iconTone`: only the icon takes the colour. */
+.feel[data-icon-tone="positive"] svg { color: var(--positive); }
+.feel[data-icon-tone="ember"] svg { color: var(--ember); }
+.feel[data-icon-tone="info"] svg { color: var(--info); }
+:global(html[data-surface="bold"]) .ghost { background-color: var(--control-bg); box-shadow: var(--control-shadow); }
+:global(html[data-surface="bold"]) .quiet { --quiet-ring: inset 0 0 #0000; }
+:global(html[data-surface="bold"]) .quiet:not(:hover) { background-color: var(--control-bg); }
 @media (prefers-reduced-motion: reduce) {
-  .default { transition: none; }
-  .default:not(:disabled):not([aria-disabled="true"]):is(:hover, :active) { transform: none; }
+  .feel { transition: none; }
+  .feel:not(:disabled):not([aria-disabled="true"]):is(:hover, :active) { transform: none; }
 }
 
 .hotbot {
   --ring: #f47a38;
   position: relative;
   isolation: isolate;
+  will-change: transform;
+  backface-visibility: hidden;
   cursor: pointer;
   touch-action: manipulation;
   color: #21130b;
   background: linear-gradient(180deg, #ffffff2e 0, #ffffff0c 18%, transparent 40%), #f47a38;
-  transition: transform 360ms cubic-bezier(.2, .9, .25, 1.35), color 180ms ease, box-shadow 180ms ease;
+  box-shadow: var(--solid-shadow);
+  transition: transform var(--dur) var(--ease-spring), color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .hotbot::before, .hotbot::after {
   content: "";
@@ -45,25 +102,27 @@
 .hotbot::before {
   box-shadow: 0 .5em 1.7em #f47a384d, 0 0 0 1px #ffbc7866;
   opacity: 0;
-  transition: opacity 220ms ease;
+  transition: opacity var(--dur-fast) ease;
 }
 .hotbot::after {
   background: linear-gradient(110deg, transparent 40%, #fff5 50%, transparent 60%) 180% 0 / 250% 100% no-repeat;
   box-shadow: inset 0 1px 0 #ffe2c566, inset 0 -1px 0 #9c390c26;
-  transition: background-position 600ms cubic-bezier(.2, .65, .3, 1);
+  transition: background-position var(--dur-slow) cubic-bezier(.2, .65, .3, 1);
 }
-.hotbot > svg { transition: transform 320ms cubic-bezier(.2, .9, .25, 1.35); }
+.hotbot > svg { transition: transform var(--dur) var(--ease-spring); }
 @media (hover: hover) and (pointer: fine) {
-  .hotbot:not(:disabled):not([aria-disabled="true"]):hover { transform: translateY(-.15em) scale(1.025); }
+  .hotbot:not(:disabled):not([aria-disabled="true"]):hover { transform: var(--solid-lift); box-shadow: var(--solid-shadow-hover); }
   .hotbot:not(:disabled):not([aria-disabled="true"]):hover::before { opacity: 1; }
   .hotbot:not(:disabled):not([aria-disabled="true"]):hover::after { background-position: -80% 0; }
   .hotbot:not(:disabled):not([aria-disabled="true"]):hover > :global(.lucide-arrow-up-right) { transform: translate(.2em, -.2em); }
 }
+/* A bold look gives the button its hard drop, so the soft glow steps aside. */
+:global(html[data-surface="bold"]) .hotbot::before { box-shadow: 0 0 0 1px #ffbc7866; }
 .hotbot:focus-visible::before { opacity: 1; }
 .hotbot:focus-visible::after { background-position: -80% 0; }
-.hotbot:not(:disabled):not([aria-disabled="true"]):active { transform: translateY(.05em) scale(.955); transition-duration: 80ms; }
-.hotbot:not(:disabled):not([aria-disabled="true"]):active::before { opacity: .3; transition-duration: 80ms; }
-.hotbot:not(:disabled):not([aria-disabled="true"]):active > svg { transform: none; transition-duration: 80ms; }
+.hotbot:not(:disabled):not([aria-disabled="true"]):active { transform: var(--solid-press); box-shadow: var(--solid-shadow-press); transition-duration: calc(var(--dur-fast) / 2); }
+.hotbot:not(:disabled):not([aria-disabled="true"]):active::before { opacity: .3; transition-duration: calc(var(--dur-fast) / 2); }
+.hotbot:not(:disabled):not([aria-disabled="true"]):active > svg { transform: none; transition-duration: calc(var(--dur-fast) / 2); }
 @media (prefers-reduced-motion: reduce) {
   .hotbot, .hotbot::before, .hotbot::after, .hotbot > svg { transition: none; }
   .hotbot:not(:disabled):not([aria-disabled="true"]):is(:hover, :active),

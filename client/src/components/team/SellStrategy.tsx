@@ -32,7 +32,7 @@ export function SellStrategyButton({ strategy, bags, round }: { strategy: Strate
     <DialogTrigger asChild>
       {round ? <button type="button" className={`${s.feedIcon} ${s.sellRound}`} disabled={busy || !held.length}>
         {busy || (selling && !held.length) ? <LoaderCircle className="animate-spin"/> : <DollarSign/>}<span className="sr-only">{selling && !held.length ? 'Selling' : 'Sell all'}</span>
-      </button> : <Button type="button" size="sm" variant="outline" className={s.sellAllButton} disabled={busy || !held.length}>
+      </button> : <Button type="button" size="sm" variant="secondary" className={s.sellAllButton} disabled={busy || !held.length}>
         {busy || (selling && !held.length) ? <LoaderCircle className="animate-spin"/> : <ArrowUpRight/>}{selling && !held.length ? 'Selling…' : 'Sell all'}
       </Button>}
     </DialogTrigger>
@@ -40,7 +40,7 @@ export function SellStrategyButton({ strategy, bags, round }: { strategy: Strate
       <div className={s.decision}>
         <div className={s.decisionHead}><span className={s.accountIcon}><ArrowUpRight size={18}/></span><span className={s.grow}><DialogTitle asChild><b>Sell all in {strategy.name}?</b></DialogTitle><small>{held.length} {held.length === 1 ? 'coin' : 'coins'} at market</small></span></div>
         <dl className={s.walletBreakdown}>
-          <div><dt>Holdings</dt><dd>{held.length ? <CoinPill coins={held.map(bag => ({ symbol: bag.token.symbol, logo: bag.token.logoUri, address: bag.token.address }))}/> : 'None left to sell'}</dd></div>
+          <div><dt>Holdings</dt><dd>{held.length ? <CoinPill coins={held.map(bag => ({ symbol: bag.token.symbol, address: bag.token.address }))}/> : 'None left to sell'}</dd></div>
           <div><dt>Current value</dt><dd>{sol(held.reduce((sum, bag) => sum + bag.valueSol, 0), 2)}</dd></div>
           <div><dt>Account</dt><dd>{[...new Set(held.map(bag => bag.mode === 'live' ? 'Real SOL' : 'Practice'))].join(' + ') || '—'}</dd></div>
           <div><dt>After selling</dt><dd>{strategy.status === 'running' ? 'Keeps running · can buy again' : 'Stays paused'}</dd></div>

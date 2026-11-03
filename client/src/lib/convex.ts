@@ -9,6 +9,4 @@ export function requireConvexClient() {
   return convex;
 }
 export { api };
-/** Cached subscriptions (needs `ConvexQueryCacheProvider`, mounted once in `BasicsShell`): a query stays live for five minutes after its last
- *  screen unmounts, so revisiting a page shows current data at once instead of starting empty. */
 export { ConvexQueryCacheProvider, usePaginatedQuery, useQuery } from 'convex-helpers/react/cache';

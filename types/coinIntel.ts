@@ -1,6 +1,3 @@
-/** What HOTBOT reads about a coin outside the chain stream, shared by every team: pump.fun's holder profiles and callouts, Fomo's theses
- *  and DexScreener's token profile. The agents service writes it; the coin page reads it. Every value is what its source reported at
- *  `readAt`; nothing here is derived from our own data. */
 
 /** A pump.fun account that holds the coin, with pump.fun's own accounting of its position. Token amounts are UI units; money is USD. */
 export type IntelHolder = { wallet: string; name: string; x?: string; verified: boolean; held: number; costUsd: number; pnlUsd: number; pnlPct: number; realizedUsd: number };
@@ -16,26 +13,30 @@ export type IntelCallout = {
  *  pump.fun does not know. */
 export type IntelPump = { users: number; holders: IntelHolder[]; callouts: IntelCallout[]; readAt: number };
 
-/** A Fomo thesis: a comment that a trader posts with a trade. `capUsd` is the market cap when it was written; `positionUsd` and `pnlUsd`
- *  are the author's position in the coin and its profit (realized and unrealized) as Fomo reports them. */
-export type IntelThesis = {
-  id: string; name: string; handle: string; x?: string; verified: boolean; text: string; at: number; capUsd: number;
-  likes: number; replies: number; positionUsd: number; pnlUsd: number;
-};
-
-/** Fomo's view of the coin. `count` is every thesis Fomo holds for it; `theses` keeps the most liked of them. */
-export type IntelFomo = { count: number; theses: IntelThesis[]; readAt: number };
-
-/** DexScreener's token profile. `header` exists only for a paid profile; it is the coin creator's own image. */
 export type IntelProfile = { header?: string; icon?: string; websites: string[]; socials: { type: string; url: string }[]; readAt: number };
 
-export type CoinIntel = { address: string; pump?: IntelPump; fomo?: IntelFomo; profile?: IntelProfile };
+/** A post on X about the coin. `followers` is the author's at the read; counts are X's at the read. `at` is milliseconds. */
+export type IntelPost = { id: string; author: string; handle: string; followers: number; verified: boolean; text: string; at: number; likes: number; reposts: number; replies: number; views: number };
+
+export type IntelX = { perHour: number; baseline: number; posts: IntelPost[]; readAt: number };
+
+export type CoinIntel = { address: string; pump?: IntelPump; profile?: IntelProfile; x?: IntelX };
+
+/** One line of talk about a coin for the chatter page (`teamIntel.chatter`): an X post or a pump.fun callout. `handle` is
+ *  the author's X handle when the source knows it; `url` exists for X posts only. A count that the source does not give is 0. */
+export type ChatterItem = {
+  source: 'x' | 'pump'; id: string; address: string; author: string; handle?: string; verified: boolean; text: string; at: number;
+  likes: number; replies: number; reposts: number; views: number; url?: string;
+};
 
 export const INTEL = {
-  /** The biggest pump.fun holders, the callouts and the Fomo theses kept per coin. */
-  holders: 20, callouts: 20, theses: 20,
-  /** How often a coin is read again: held coins, other coins in a pipeline, and DexScreener profiles. */
+  /** The biggest pump.fun holders, the callouts and the X posts kept per coin. */
+  holders: 20, callouts: 20, posts: 10,
+  /** How often a coin is read again: held coins, other coins in a pipeline, and token profiles. */
   heldMs: 30 * 60_000, otherMs: 2 * 60 * 60_000, profileMs: 6 * 60 * 60_000,
   /** An unchanged read is written again only after this long, so `readAt` stays close to the truth without a write per read. */
   touchMs: 60 * 60_000,
+  xRead: 20, xCoinMs: 12 * 60 * 60_000, xAppDaily: 100, xKeyDaily: 200,
+  /** The chatter page asks for at most this many coins at once and gets at most `chatterItems` lines. */
+  chatterCoins: 8, chatterItems: 60,
 } as const;

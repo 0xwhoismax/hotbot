@@ -11,7 +11,7 @@ function ToggleGroup({ className, ...props }: React.ComponentProps<typeof Toggle
     <ToggleGroupPrimitive.Root
       data-slot="toggle-group"
       className={cn(
-        "inline-flex shrink-0 items-center gap-[0.15em] rounded-[var(--r-pill)] bg-[color-mix(in_oklab,var(--foreground)_7%,transparent)] p-[0.2em]",
+        "inline-flex shrink-0 items-center gap-[0.15em] rounded-[var(--r-pill)] bg-[var(--control-bg)] p-[0.2em] shadow-[var(--control-shadow)]",
         className
       )}
       {...props}

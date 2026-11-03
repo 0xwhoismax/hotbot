@@ -4,9 +4,10 @@ import { BotAvatar } from '@/components/hotbot/BotAvatar';
 import { TokenAvatar } from '@/components/token/TokenAvatar';
 import { change, type HomeData } from './data';
 import { appHref, pct, tone } from './format';
+import { coinLink } from '../../../../types/coinKey';
 import o from './onboarding.module.css';
 
-type Coin = { symbol: string; logo: string | null; address: string; change: number | null };
+type Coin = { symbol: string; logo: string; address: string; change: number | null };
 const LANES = [
   { role: 'research' as const, name: 'ResearchBot', verb: 'Checking', done: 'Passed' },
   { role: 'sniper' as const, name: 'SniperBot', verb: 'Watching', done: 'Entry hit' },
@@ -40,7 +41,6 @@ export function Stage() {
     return { key: tick - step, text: rejected ? `ResearchBot skipped ${coin.symbol}: holders too concentrated` : step % 2 ? `SniperBot armed ${coin.symbol}` : `TraderBot bought ${coin.symbol}`, bot: rejected ? 'research' as const : step % 2 ? 'sniper' as const : 'trader' as const };
   });
   return <div className={o.stage} aria-label="Preview of your team working with live market coins">
-    <div className={o.stageHead}><span className={o.live}/>Live market preview</div>
     <div className={o.lanes}>
       {lanes.map((lane, index) => <div key={lane.role} className={o.lane}>
         <div className={o.laneBot}><BotAvatar role={lane.role} size={76}/></div>
@@ -58,22 +58,22 @@ export function Stage() {
 
 function Chip({ coin, status, active = false }: { coin: Coin; status: string; active?: boolean }) {
   return <div className={o.chip} data-active={active || undefined}>
-    <TokenAvatar className="size-7 rounded-[28%]" address={coin.address || undefined} logoUrl={coin.logo ?? undefined} symbol={coin.symbol} network="solana" fallback="letter" disableDetailFallback/>
+    <TokenAvatar className="size-7 rounded-[28%]" address={coin.address} src={coin.logo} symbol={coin.symbol}/>
     <span><b>{coin.symbol}</b><small>{status}</small></span>
   </div>;
 }
 
-type LaneCoin = { key: string; symbol: string; logo?: string; address?: string; status: string; tone?: 'up' | 'down'; href?: string };
+type LaneCoin = { key: string; symbol: string; address?: string; status: string; tone?: 'up' | 'down'; href?: string };
 type Lanes = { research: LaneCoin[]; sniper: LaneCoin[]; trader: LaneCoin[]; live: boolean };
 
 /** What each bot is on right now, from the home the page already watches: ResearchBot's checks, SniperBot's asks, waits and queue, TraderBot's
  *  coins with their move. `links` off leaves the coins unlinked (the launch step keeps onboarding on screen whatever the address says). */
 export function laneCoins(data: HomeData, links = true): Lanes {
-  const coin = (item: { id: string; token: HomeData['bags'][number]['token'] }, status: string, move?: 'up' | 'down'): LaneCoin =>
-    ({ key: item.id, symbol: item.token.symbol, logo: item.token.logoUri ?? undefined, address: item.token.address, status, tone: move, href: links ? appHref('tokens', item.id) : undefined });
+  const coin = (item: { id: string; ck: string | null; token: HomeData['bags'][number]['token'] }, status: string, move?: 'up' | 'down'): LaneCoin =>
+    ({ key: item.id, symbol: item.token.symbol, address: item.token.address, status, tone: move, href: links ? appHref('tokens', coinLink(item)) : undefined });
   return {
     research: data.researching.map(item => coin(item, 'Checking')),
-    sniper: [...data.needs.map(item => coin(item, 'Wants your OK')), ...data.watching.map(item => coin(item, 'Waiting to buy')), ...data.queued.map(item => coin(item, 'Waits for room'))],
+    sniper: [...data.needs.map(item => coin(item, 'Wants your OK')), ...data.watching.map(item => coin(item, 'Waiting to buy'))],
     trader: data.bags.map(bag => { const move = change(bag); return coin(bag, bag.stage === 'buying' ? 'Buying…' : bag.stage === 'selling' ? 'Selling…' : move == null ? 'Holding' : pct(move), bag.stage === 'held' ? tone(move) : undefined); }),
     live: data.strategies.some(row => row.status === 'running') && !data.workspace.halted && data.worker.online,
   };
@@ -98,7 +98,7 @@ export function TeamStrip({ research, sniper, trader, live }: Lanes) {
   ];
   return <div className={o.strip}>{lanes.map(lane => { const coin = lane.coins[0]; return <a key={lane.role} className={o.stripBot} href={coin?.href}>
     <span className={o.stripHead}><BotAvatar role={lane.role} size={22}/><small>{lane.name}</small>{lane.coins.length > 1 && <i>+{lane.coins.length - 1}</i>}</span>
-    {coin ? <span className={o.stripCoin}><TokenAvatar className="size-4 rounded-[28%]" address={coin.address} logoUrl={coin.logo} symbol={coin.symbol} network="solana" fallback="letter" disableDetailFallback/><b>{coin.symbol}</b></span> : null}
+    {coin ? <span className={o.stripCoin}><TokenAvatar className="size-4 rounded-[28%]" address={coin.address} symbol={coin.symbol}/><b>{coin.symbol}</b></span> : null}
     <em className={o.stripStatus} data-tone={coin?.tone}>{coin ? coin.status : lane.idle}</em>
   </a>; })}</div>;
 }
@@ -115,7 +115,7 @@ export function TeamLanes({ research, sniper, trader, live }: Lanes) {
     <strong>{lane.name}</strong>
     <div className={o.chips}>
       {lane.coins.slice(0, 2).map(coin => <a key={coin.key} href={coin.href} className={o.chip} data-active style={{ color: 'inherit', textDecoration: 'none' }}>
-        <TokenAvatar className="size-7 rounded-[28%]" address={coin.address} logoUrl={coin.logo} symbol={coin.symbol} network="solana" fallback="letter" disableDetailFallback/>
+        <TokenAvatar className="size-7 rounded-[28%]" address={coin.address} symbol={coin.symbol}/>
         <span><b>{coin.symbol}</b><small style={coin.tone ? { color: coin.tone === 'up' ? 'var(--positive)' : 'var(--destructive)' } : undefined}>{coin.status}</small></span>
       </a>)}
       {!lane.coins.length && <div className={o.chipIdle}><span className={o.idleDot}/>{lane.idle}</div>}

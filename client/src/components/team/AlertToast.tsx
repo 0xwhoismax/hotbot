@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAtomValue } from 'jotai';
 import { toast } from 'sonner';
 import { BotAvatar } from '@/components/hotbot/BotAvatar';
@@ -9,6 +8,7 @@ import type { AlertTopic } from '../../../../types/team';
 import type { HomeData } from './data';
 import { appHref } from './format';
 import { viewedAtom } from './state';
+import { useRouter } from '@/lib/appNavigation';
 
 type Alert = NonNullable<HomeData['alert']>;
 const DAY_MS = 86_400_000, SEEN_KEY = 'hotbot:alert-seen';
@@ -33,7 +33,7 @@ function holds(alert: Alert, data: HomeData) {
       const need = sizes('paper');
       return need.length > 0 && data.money.cash < Math.min(...need) && !data.bags.some(row => row.mode === 'paper');
     }
-    case 'walletSol': { const need = sizes('live'); return need.length > 0 && data.workspace.liveCashSol < Math.min(...need) + 0.01; }
+    case 'walletSol': { const need = sizes('live'); return need.length > 0 && data.portfolios.live.cash < Math.min(...need) + 0.01; }
     case 'approvals': return data.needs.length > 0;
     case 'worker': return !data.worker.online;
   }

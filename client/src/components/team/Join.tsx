@@ -1,18 +1,23 @@
 "use client";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type SyntheticEvent } from 'react';
 import Link from 'next/link';
-import { useAction, useMutation } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { useAtom } from 'jotai';
 import { atomWithStorage, createJSONStorage } from 'jotai/utils';
-import { ArrowDown, ArrowLeft, ArrowUpRight, Check, ClipboardPaste, Crown, Flame, Footprints, Link2, LoaderCircle, Rocket, ScanSearch, ShieldCheck, Sprout, Timer, TrendingUp, Wallet, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Check, Crown, Flame, Footprints, Link2, LoaderCircle, Rocket, ScanSearch, ShieldCheck, Sprout, Timer, TrendingUp, X } from 'lucide-react';
 import { api } from '@/lib/convex';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 import { BotAvatar } from '@/components/hotbot/BotAvatar';
-import { formatNumber } from '@/utils/formatterUtils';
-import { APPLICATION, APPLICATION_POST, EXPERIENCE, TERMINALS, TOOLS, isSolanaAddress, telegramHandle, xHandle, type ExperienceId, type TerminalId, type ToolId } from '../../../../types/application';
+import { useTokenBuy } from '@/hooks/useTokenBuy';
+import { APPLICATION, APPLICATION_POST, EXPERIENCE, TERMINALS, TOOLS, isSolanaAddress, telegramHandle, whyProblem, xHandle, type ExperienceId, type TerminalId, type ToolId } from '../../../../types/application';
 import { HOTBOT_MINT, type AgentRole } from '../../../../types/hotbot';
-import { failure } from './state';
+import { failure, useSession } from './state';
+import { APPLICATION_KEY } from '@/store/user/atoms';
+import { useNow } from './Parts';
+import { Paste, WalletField } from './WalletField';
+import { WayIn, type WayKey } from './WayIn';
 import o from './onboarding.module.css';
 
 type Draft = {
@@ -22,7 +27,7 @@ type Draft = {
 };
 const EMPTY: Draft = { holds: null, wallet: '', x: '', telegram: '', trades: null, terminals: [], experience: null, tools: [], noTools: false, toolsUsed: '', why: '', comment: '', sent: false };
 /** The answers so far, kept in this browser: on a phone people leave to copy their wallet, and coming back (or a reload) keeps what they typed. */
-const draftAtom = atomWithStorage<Draft>('hotbot-application', EMPTY,
+const draftAtom = atomWithStorage<Draft>(APPLICATION_KEY, EMPTY,
   createJSONStorage<Draft>(() => { try { return localStorage; } catch { return { getItem: () => null, setItem: () => {}, removeItem: () => {} }; } }));
 
 type QuestionId = 'hotbot' | 'x' | 'telegram' | 'terminals' | 'experience' | 'tools' | 'toolsUsed' | 'why' | 'comment';
@@ -39,6 +44,7 @@ const QUESTIONS: { id: QuestionId; host: AgentRole; title: string; lead?: string
   { id: 'comment', host: 'sniper', title: 'Did you comment on our application post?', lead: 'Paste the link to your comment.', optional: true },
 ];
 const LAST = QUESTIONS.length, SEND = LAST + 1;
+const WAY_KEYS: [WayKey, WayKey, WayKey] = ['apply', 'signin', 'check'];
 
 /** What stops a question counting as answered, in the words shown under it. Optional questions only fail on length. */
 function problem(id: QuestionId, d: Draft): string | null {
@@ -51,7 +57,7 @@ function problem(id: QuestionId, d: Draft): string | null {
     case 'tools': return null;
     case 'toolsUsed': return d.toolsUsed.trim().length > APPLICATION.toolsUsed ? `Keep it under ${APPLICATION.toolsUsed} characters.` : null;
     case 'comment': return d.comment.trim().length > APPLICATION.comment ? `Keep it under ${APPLICATION.comment} characters.` : null;
-    case 'why': { const length = d.why.trim().length; return length < APPLICATION.whyMin ? 'Tell us why in a sentence or two.' : length > APPLICATION.why ? `Keep it under ${APPLICATION.why} characters.` : null; }
+    case 'why': return whyProblem(d.why);
   }
 }
 const answered = (id: QuestionId, d: Draft) => id === 'tools' ? d.noTools || d.tools.length > 0 : id === 'toolsUsed' ? Boolean(d.toolsUsed.trim()) : id === 'comment' ? Boolean(d.comment.trim()) : !problem(id, d);
@@ -60,13 +66,24 @@ const phone = () => window.matchMedia('(max-width: 48rem)').matches;
 const calm = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const tint = (color: string) => ({ '--style-color': color }) as CSSProperties;
 
-/** /join: the application to get into HOTBOT. Wide screens scroll through every question with the one in the middle in focus; phones show one a screen. */
-export function Join() {
+/** /join: the application to get into HOTBOT. Wide screens scroll through every question with the one in the middle in focus; phones show one a screen.
+ *  `direct` (/join/apply): the questions without the intro, for someone who already chose Apply; a sent application opens again to change it. */
+export function Join({ direct = false }: { direct?: boolean }) {
+  const buyLink = useTokenBuy();
   const [stored, setStored] = useAtom(draftAtom), draft = { ...EMPTY, ...stored };
   const set = (patch: Partial<Draft>) => setStored(current => ({ ...EMPTY, ...current, ...patch }));
   const submit = useMutation(api.applications.submit);
-  const [at, setAt] = useState(0), [dir, setDir] = useState<'next' | 'back'>('next'), [active, setActive] = useState(0);
+  const [at, setAt] = useState(direct ? 1 : 0), [dir, setDir] = useState<'next' | 'back'>('next'), [active, setActive] = useState(direct ? 1 : 0);
   const [tried, setTried] = useState<ReadonlySet<QuestionId>>(() => new Set()), [sending, setSending] = useState(false), [error, setError] = useState<string | null>(null), [again, setAgain] = useState(false);
+  // A person HOTBOT let in who hasn't paid the pass goes on in the app's onboarding: their team, then the pass.
+  const session = useSession(), signedIn = session.signedIn && session.connected, clock = useNow(60_000);
+  const me = useQuery(api.access.mine, signedIn ? {} : 'skip'), paidNow = Boolean(me && (me.admin || (me.paidUntil ?? 0) > (clock ?? Infinity)));
+  const [paying, setPaying] = useState(false);
+  useEffect(() => {
+    if (!me?.seated || paidNow) return;
+    setPaying(true);
+    window.location.replace('/app');
+  }, [me?.seated, paidNow]);
   const sections = useRef<(HTMLElement | null)[]>([]), advancing = useRef(0);
 
   // Wide screens: the section crossing the middle of the window is in focus (the rest dim), and is where a phone-sized window picks up.
@@ -106,25 +123,33 @@ export function Join() {
       setAgain(result.again); set({ sent: true }); setTried(new Set()); window.scrollTo({ top: 0 });
     } catch (cause) { setError(failure(cause).message); } finally { setSending(false); }
   };
+  const edit = () => { set({ sent: false }); requestAnimationFrame(() => go(1)); };
+  const wayOn = { apply: () => go(1), signin: '/app?signin', check: '/app?check' };
+  // The stored answers have loaded by now: the atom mounts in the effect of `useAtom` above, which runs first.
+  useEffect(() => { if (direct) set({ sent: false }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const done = QUESTIONS.filter(question => answered(question.id, draft)).length;
   const header = (back: boolean) => <header className={o.joinTop} style={{ '--answered': done / LAST, '--step': Math.min(at, LAST) / LAST } as CSSProperties}>
     {back && <button type="button" className={o.joinBack} onClick={() => go(at - 1)} aria-label="Previous question"><ArrowLeft/></button>}
     <Link href="/" className={o.joinBrand}><BotAvatar role="coordinator" size={24}/>HOTBOT</Link>
-    {!draft.sent && <span className={o.joinCount}><span className={o.wideOnly}>{done} of {LAST} answered</span><span className={o.phoneOnly}>{at ? `${at} of ${LAST}` : 'Apply'}</span></span>}
-    {!draft.sent && <span className={o.joinBar} aria-hidden><i/></span>}
+    {!draft.sent && <span className={o.joinCount}><span className={o.wideOnly}>{done} of {LAST} answered</span>{at > 0 && <span className={o.phoneOnly}>{at} of {LAST}</span>}</span>}
+    {!draft.sent && <span className={`${o.joinBar} ${at === 0 ? o.wideOnly : ''}`} aria-hidden><i/></span>}
   </header>;
 
+  if (paying) return <div className={o.join}>
+    {header(false)}
+    <main className={o.joinBody}><LoaderCircle className={o.spin}/></main>
+  </div>;
   if (draft.sent) return <div className={o.join}>
     {header(false)}
-    <main className={o.joinBody}><Sent draft={draft} again={again} onEdit={() => { set({ sent: false }); requestAnimationFrame(() => go(1)); }}/></main>
+    <main className={o.joinBody}><Sent draft={draft} again={again} onEdit={edit}/></main>
   </div>;
 
   const missing = QUESTIONS.filter(question => problem(question.id, draft)).length;
   return <div className={o.join} data-dir={dir}>
-    {header(at > 0)}
+    {header(at > (direct ? 1 : 0))}
     <main className={o.joinBody}>
-      <section ref={element => { sections.current[0] = element; }} data-index={0} className={o.joinHero} data-current={at === 0 || undefined} aria-labelledby="join-title">
+      {!direct && <section ref={element => { sections.current[0] = element; }} data-index={0} className={o.joinHero} data-current={at === 0 || undefined} aria-labelledby="join-title">
         <div className={o.crew}><BotAvatar role="coordinator" size={72}/><BotAvatar role="research" size={54}/><BotAvatar role="sniper" size={54}/><BotAvatar role="trader" size={54}/></div>
         <span className={o.livePill} data-on><span className={o.livePulse} aria-hidden/>Applications open</span>
         <h1 className={o.title} id="join-title">Join the HOTBOT team.</h1>
@@ -134,8 +159,8 @@ export function Join() {
           <li><Timer/><span><b>Runs around the clock</b>, even with the tab closed</span></li>
           <li><ShieldCheck/><span><b>TraderBot decides the exits</b> on every price move</span></li>
         </ul>
-        <Button size="lg" className={`${o.cta} ${o.joinStart} ${o.wideOnly}`} onClick={() => go(1)}>Start<ArrowDown/></Button>
-      </section>
+        <div className={`${o.joinWay} ${o.wideOnly}`}><WayIn keys={WAY_KEYS} on={wayOn}/></div>
+      </section>}
 
       {QUESTIONS.map((question, index) => {
         const number = index + 1, shown = tried.has(question.id) ? problem(question.id, draft) : null, errorId = shown ? `join-${question.id}-error` : undefined;
@@ -151,7 +176,7 @@ export function Join() {
           </div>
           <h2 className={o.qTitle} id={`join-${question.id}`}>{question.title}</h2>
           {question.lead && <p className={o.qLead}>{question.lead}</p>}
-          <div className={o.qBody}><Answer id={question.id} draft={draft} set={set} invalid={Boolean(shown)} errorId={errorId} onPicked={() => advance(number)}/></div>
+          <div className={o.qBody}><Answer id={question.id} draft={draft} set={set} invalid={Boolean(shown)} errorId={errorId} onPicked={() => advance(number)} buyLink={buyLink}/></div>
           {shown && <p className={o.qError} id={errorId} role="alert" key={`${shown}-${tried.size}`}>{shown}</p>}
           <div className={o.qNext}>
             <Button size="lg" onClick={() => next(number)}>{question.optional && !answered(question.id, draft) ? 'Skip' : 'OK'}<Check/></Button>
@@ -171,16 +196,16 @@ export function Join() {
 
     <nav className={o.joinNav} aria-label="Application">
       {error && at === LAST && <p className={o.qError} role="alert">{error}</p>}
-      {at === 0 ? <Button size="lg" className={o.cta} onClick={() => go(1)}>Start</Button>
+      {at === 0 ? <WayIn keys={WAY_KEYS} on={wayOn}/>
         : <Button size="lg" className={o.cta} disabled={sending} onClick={() => next(at)}>{at === LAST ? sending ? <><LoaderCircle className="animate-spin"/>Sending…</> : 'Send application'
           : QUESTIONS[at - 1]?.optional && !answered(QUESTIONS[at - 1].id, draft) ? 'Skip' : 'Next'}</Button>}
     </nav>
   </div>;
 }
 
-type AnswerProps = { id: QuestionId; draft: Draft; set: (patch: Partial<Draft>) => void; invalid: boolean; errorId?: string; onPicked: () => void };
+type AnswerProps = { id: QuestionId; draft: Draft; set: (patch: Partial<Draft>) => void; invalid: boolean; errorId?: string; onPicked: () => void; buyLink: boolean };
 /** The controls for one question. */
-function Answer({ id, draft, set, invalid, errorId, onPicked }: AnswerProps) {
+function Answer({ id, draft, set, invalid, errorId, onPicked, buyLink }: AnswerProps) {
   const described = { 'aria-invalid': invalid || undefined, 'aria-describedby': errorId };
   switch (id) {
     case 'hotbot': return <>
@@ -188,7 +213,7 @@ function Answer({ id, draft, set, invalid, errorId, onPicked }: AnswerProps) {
         <Choice checked={draft.holds === true} onPick={event => { set({ holds: true }); const section = event.currentTarget.closest('section'); requestAnimationFrame(() => section?.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true })); }} icon={<Flame/>} color="var(--ember)" name="Yes, I hold $HOTBOT" text="Paste the wallet that holds it."/>
         <Choice checked={draft.holds === false} onPick={() => { set({ holds: false }); onPicked(); }} icon={<X/>} name="Not yet" text="That’s fine."/>
       </div>
-      {draft.holds !== true && <a className={`${o.link} ${o.buy}`} href={`https://pump.fun/coin/${HOTBOT_MINT}`} target="_blank" rel="noopener noreferrer"><img src="/icons/launchpads/pumpfun.webp" alt="" width={16} height={16}/>Buy $HOTBOT on Pump.fun<ArrowUpRight aria-hidden/></a>}
+      {buyLink && draft.holds !== true && <a className={`${o.link} ${o.buy}`} href={`https://pump.fun/coin/${HOTBOT_MINT}`} target="_blank" rel="noopener noreferrer"><img src="/icons/launchpads/pumpfun.webp" alt="" width={16} height={16}/>Buy $HOTBOT on Pump.fun<ArrowUpRight aria-hidden/></a>}
       <Collapsible open={draft.holds === true}><CollapsibleContent><div className={o.reveal}>
         <WalletField value={draft.wallet} onChange={wallet => set({ wallet })} invalid={invalid && draft.holds === true} errorId={errorId}/>
       </div></CollapsibleContent></Collapsible>
@@ -211,7 +236,7 @@ function Answer({ id, draft, set, invalid, errorId, onPicked }: AnswerProps) {
           </div>
           {TERMINALS.filter(terminal => picked.has(terminal.id)).map(terminal => <label key={terminal.id} className={o.termRow}>
             <img src={terminal.icon} alt="" width={32} height={32}/>
-            <input className={o.field} value={picked.get(terminal.id) ?? ''} maxLength={APPLICATION.terminalHandle} placeholder={`Your ${terminal.name} name or link (optional)`} aria-label={`Your ${terminal.name} name or link`} autoComplete="off" autoCapitalize="off" spellCheck={false}
+            <Input className={o.field} value={picked.get(terminal.id) ?? ''} maxLength={APPLICATION.terminalHandle} placeholder={`Your ${terminal.name} name or link (optional)`} aria-label={`Your ${terminal.name} name or link`} autoComplete="off" autoCapitalize="off" spellCheck={false}
               onChange={event => set({ terminals: draft.terminals.map(row => row.id === terminal.id ? { ...row, handle: event.target.value } : row) })}/>
           </label>)}
         </div></CollapsibleContent></Collapsible>
@@ -259,13 +284,6 @@ function Choice({ checked, onPick, icon, color = 'var(--foreground)', name, text
   </div>;
 }
 
-function Paste({ onPaste }: { onPaste: (text: string) => void }) {
-  return <button type="button" className={o.paste} onClick={async event => {
-    const field = event.currentTarget.parentElement?.querySelector('input');
-    try { const text = (await navigator.clipboard.readText()).trim(); if (text) onPaste(text); else field?.focus(); } catch { field?.focus(); }
-  }}><ClipboardPaste aria-hidden/>Paste</button>;
-}
-
 /** An X or Telegram handle: "@" in front, links and a typed "@" trimmed to the handle as they arrive. */
 function HandleField({ value, onChange, normalize, placeholder, label, invalid, errorId }: { value: string; onChange: (value: string) => void; normalize: (text: string) => string; placeholder: string; label: string; invalid: boolean; errorId?: string }) {
   const take = (text: string) => onChange(/[/.]/.test(text) && normalize(text) ? normalize(text) : text.replace(/^\s*@/, ''));
@@ -275,34 +293,6 @@ function HandleField({ value, onChange, normalize, placeholder, label, invalid, 
       autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} enterKeyHint="next" maxLength={80}/>
     <Paste onPaste={take}/>
   </div>;
-}
-
-type Read = { address: string } & ({ state: 'reading' } | { state: 'read'; hotbot: number; sol: number } | { state: 'failed' });
-/** The wallet that holds $HOTBOT. A full address is read at once and its balances shown; submitting reads them again on the server. */
-function WalletField({ value, onChange, invalid, errorId }: { value: string; onChange: (value: string) => void; invalid: boolean; errorId?: string }) {
-  const readWallet = useAction(api.applications.wallet), [read, setRead] = useState<Read | null>(null);
-  const take = (text: string) => {
-    onChange(text);
-    const address = text.trim();
-    if (!isSolanaAddress(address) || read?.address === address) return;
-    setRead({ address, state: 'reading' });
-    const settle = (next: Read) => setRead(current => current?.address === address ? next : current);
-    readWallet({ address }).then(balances => settle({ address, state: 'read', ...balances }), () => settle({ address, state: 'failed' }));
-  };
-  const shown = read?.address === value.trim() ? read : null, holds = shown?.state === 'read' && shown.hotbot > 0;
-  return <>
-    <div className={o.handle} data-invalid={invalid || undefined}>
-      <Wallet aria-hidden/>
-      <input data-autofocus className={o.address} value={value} onChange={event => take(event.target.value)} placeholder="Solana wallet address" aria-label="Wallet address" aria-invalid={invalid || undefined} aria-describedby={errorId}
-        autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} enterKeyHint="next" maxLength={60}/>
-      <Paste onPaste={take}/>
-    </div>
-    {shown && <span className={o.holding} data-tone={holds ? 'ember' : undefined} role="status">
-      {shown.state === 'reading' ? <><LoaderCircle className={o.spin} aria-hidden/>Reading wallet</>
-        : shown.state === 'failed' ? 'Couldn’t read this wallet right now. We’ll check it after you send.'
-        : <>{holds ? <Flame aria-hidden/> : <Wallet aria-hidden/>}{holds ? <b>{formatNumber(shown.hotbot, { compact: true })} $HOTBOT</b> : 'No $HOTBOT in this wallet'}<span>· {formatNumber(shown.sol, { precision: 2 })} SOL</span></>}
-    </span>}
-  </>;
 }
 
 /** Sparks thrown out from behind the team when the application lands. */
@@ -324,6 +314,7 @@ function Sent({ draft, again, onEdit }: { draft: Draft; again: boolean; onEdit: 
     <div className={o.sentHandles}>{x && <span><small>X</small>@{x}</span>}{telegram && <span><small>Telegram</small>@{telegram}</span>}</div>
     <div className={o.actions}>
       <Button asChild size="lg" className={o.cta}><Link href="/">Back to HOTBOT</Link></Button>
+      <Button asChild size="lg" variant="outline" className={o.cta}><a href="/app?check">Check status</a></Button>
       <button type="button" className={o.link} onClick={onEdit}>Change my answers</button>
     </div>
   </section>;

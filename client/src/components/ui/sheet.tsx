@@ -66,12 +66,15 @@ function SheetContent({
             "inset-y-0 left-[0em] h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
           side === "top" &&
             "inset-x-0 top-[0em] h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+          // A bottom sheet runs 6em past the screen's bottom edge, padded back by as much, so where iOS draws it too high (a home-screen app) the
+          // sheet still reaches the edge.
           side === "bottom" &&
-            "inset-x-0 bottom-[0em] h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+            "inset-x-0 bottom-[-6em] h-auto max-h-[calc(100dvh-env(safe-area-inset-top)+4em)] gap-[0em] overflow-y-auto overscroll-contain rounded-t-[calc(1.5em*var(--r-scale))] bg-[var(--menu-bg)] pb-[calc(env(safe-area-inset-bottom)+6em)] shadow-[var(--menu-shadow)] data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           className
         )}
         {...props}
       >
+        {side === "bottom" && <SheetGrabber />}
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close className="absolute top-[1em] right-[1em] inline-flex size-[2.5em] items-center justify-center rounded-full opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-secondary">
@@ -81,6 +84,52 @@ function SheetContent({
         )}
       </SheetPrimitive.Content>
     </SheetPortal>
+  )
+}
+
+/** A bottom sheet's handle. A tap or a drag down past a quarter of the sheet closes it; a shorter drag springs back. */
+function SheetGrabber() {
+  const from = React.useRef<number | null>(null)
+  const pulled = React.useRef(0)
+  const sheet = (handle: HTMLElement) => handle.closest<HTMLElement>("[data-slot=sheet-content]")
+  const pull = (handle: HTMLElement, by: number) => {
+    const node = sheet(handle)
+    if (!node) return
+    node.style.transition = by ? "none" : ""
+    node.style.translate = by ? `0 ${by}px` : ""
+  }
+  const closes = (handle: HTMLElement) => pulled.current > (sheet(handle)?.offsetHeight ?? 0) / 4
+  return (
+    <SheetPrimitive.Close
+      tabIndex={-1}
+      aria-hidden
+      className="flex h-[1.75em] w-full shrink-0 cursor-grab touch-none justify-center select-none pt-[0.6em] outline-none active:cursor-grabbing"
+      onPointerDown={(event) => {
+        from.current = event.clientY
+        pulled.current = 0
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }}
+      onPointerMove={(event) => {
+        if (from.current === null) return
+        pulled.current = Math.max(0, event.clientY - from.current)
+        pull(event.currentTarget, pulled.current)
+      }}
+      onPointerUp={(event) => {
+        from.current = null
+        if (closes(event.currentTarget)) event.currentTarget.click()
+        else pull(event.currentTarget, 0)
+      }}
+      onPointerCancel={(event) => {
+        from.current = null
+        pulled.current = 0
+        pull(event.currentTarget, 0)
+      }}
+      onClick={(event) => {
+        if (pulled.current > 4 && !closes(event.currentTarget)) event.preventDefault()
+      }}
+    >
+      <span className="h-[0.3em] w-[2.5em] rounded-full bg-muted-foreground/40" />
+    </SheetPrimitive.Close>
   )
 }
 

@@ -1,8 +1,7 @@
 "use client";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ArrowDown, ArrowRight, Check, ChevronRight, CopyPlus, FilePlus2, FlaskConical, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, XAxis, YAxis, useActiveTooltipLabel, useChartHeight, useChartWidth, useXAxisScale, useYAxisScale } from 'recharts';
@@ -15,18 +14,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TokenAvatar } from '@/components/token/TokenAvatar';
 import { EXIT_PLANS, TRAIL, describeExits, namedExitPlan, trailPct, type ExitPlanId } from '../../../../types/exits';
 import { tipWorth, type CoinView, type Curves as CurveData, type Gap, type LabMeta, type OwnPlans, type Tip } from '../../../../types/lab';
-import { BLANK, blankRules, tradesAs } from '../../../../types/team';
+import { BLANK, startRules, tradesAs } from '../../../../types/team';
 import type { CheckRow } from './checks';
-import type { HomeData, StrategyRow } from './data';
+import { realSince, type HomeData, type StrategyRow } from './data';
 import { appHref, signedSol, usd } from './format';
 import { AddStrategyButton, CoinPill, Hint, numText, useSettingSpot } from './Parts';
 import { byExit, checkLabel, rulesOfCheck, type OwnTrade, type Result } from './labModel';
 import { useLab, useLabData, useOwnTrades } from './labData';
 import { CoinReplayBlock, type ReplayCoin } from './LabReplay';
 import { TAB_KEYS, checksOn, describeChanges, looserIsLower, useSettingsDraft, useSettingsSections, type SettingsDraft, type Tab } from './Settings';
+import { useStrategySave } from './LossStop';
 import { draftBridgeAtom, draftProposalAtom, settingSpotAtom, useCommand } from './state';
+import { Paged } from './Stream';
 import { guideOf } from '../../../../types/settingsGuide';
 import s from './team.module.css';
+import { Link, useRouter } from '@/lib/appNavigation';
 
 const pc = (x: number | undefined) => x !== undefined && Number.isFinite(x) ? `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x * 100).toFixed(x !== 0 && Math.abs(x) < 0.1 ? 1 : 0)}%` : '–';
 const toneOf = (x: number | undefined) => x === undefined || !Number.isFinite(x) || Math.abs(x) < 1e-6 ? undefined : x > 0 ? 'up' : 'down';
@@ -41,11 +43,11 @@ const planIdOf = (draft: SettingsDraft) => namedExitPlan(draft.rules.exits);
 /** The Lab's own new strategy (`/app/lab/new`, `?from=<id>` for a copy): the draft is tried here and Create saves it paused. */
 const NEW = 'new';
 /** The row the Lab and its settings read for a strategy not made yet: a copy of `from` (its rules and entry, none of its money or history) or
- *  a blank one. */
+ *  a new one (`startRules`). Either trades Practice, as `labStrategy` makes it. */
 function draftRow(from: StrategyRow | null, at: number, template: StrategyRow | undefined): StrategyRow {
   const base = from ?? template;
-  return { ...base!, id: NEW as StrategyRow['id'], name: from ? `${from.name} copy` : BLANK.name, description: '', preset: from?.preset ?? BLANK.preset, status: 'paused', dipPct: from?.dipPct ?? 0, rules: from?.rules ?? blankRules(),
-    funnel: { found: 0, passed: 0, armed: 0, bought: 0 }, realizedPnlSol: 0, openPnlSol: 0, held: 0, spark: [], traded: false, startedAt: at, sold: 0, wins: 0 };
+  return { ...base!, id: NEW as StrategyRow['id'], name: from ? `${from.name} copy` : BLANK.name, description: '', status: 'paused', mode: 'paper', dipPct: from?.dipPct ?? 0, rules: from?.rules ?? startRules(),
+    funnel: { found: 0, passed: 0, armed: 0, bought: 0 }, realizedPnlSol: 0, openPnlSol: 0, held: 0, spark: [], traded: false, startedAt: at, sold: 0, wins: 0, loss: null, twinId: null, pulse: null };
 }
 
 // ---- The page ----
@@ -100,33 +102,29 @@ function LabSkeleton() {
   return <div className={s.studioSkeleton} role="status" aria-label="Loading the Lab"><div className={s.surface}/><div className={s.surface}/><div className={s.surface}/></div>;
 }
 
-/** Real profit since `from`: the strategy's total now (sold plus held at the latest prices) less its profit line's value at `from`. */
-function realSince(strategy: StrategyRow, from: number) {
-  const before = [...strategy.spark].reverse().find(point => point.at <= from)?.pnl ?? 0;
-  return strategy.realizedPnlSol + strategy.openPnlSol - before;
-}
-
 /** `fresh`: a strategy not made yet (blank, or a copy of `from`): no real side, the Lab's whole window, and Create instead of Apply. */
 function Studio({ data, home, strategy, strategies, portfolio, fresh, head }: { data: LabMeta; home: HomeData; strategy: StrategyRow; strategies: StrategyRow[]; portfolio: OwnTrade[] | undefined; fresh?: { from: StrategyRow | null }; head: (current?: StrategyRow, end?: ReactNode) => ReactNode }) {
   const command = useCommand(), draft = useSettingsDraft(strategy)!, router = useRouter();
   const own = useOwnTrades(fresh ? fresh.from?.id ?? null : strategy.id, OWN_LIMIT);
+  // The replay's search and entries read every sale on hand: the strategy's own and the portfolio's latest.
   const trades = useMemo(() => portfolio && own ? [...new Map([...portfolio, ...own].map(trade => [trade.id, trade])).values()] : undefined, [portfolio, own]);
   const [tab, setTab] = useState<Tab>('search'), [open, setOpen] = useState<string | null>(null), [saving, setSaving] = useState(false);
+  // A link may name a coin to replay (/app/lab?coin=<mint>, from the stream page's timeline).
   const linked = useSearchParams().get('coin');
   const [coin, setCoin] = useState<ReplayCoin | null>(() => linked ? { mint: linked, symbol: `${linked.slice(0, 4)}…`, openedAt: Date.now() } : null);
   const [filter, setFilter] = useState<Filter>({ id: 'all' });
   // Real and Lab on the same dates: research's reads since the strategy started, or since the Lab's window opens if it started before.
   const since = fresh ? data.from : Math.max(strategy.startedAt, data.from);
-  // A full page of sales means older ones weren't read: every coin bought after the oldest sale on hand closed is on hand, so the coin-by-coin
-  // comparison starts there.
-  const gapFrom = own && own.length >= OWN_LIMIT ? Math.max(since, Math.min(...own.map(trade => trade.closedAt))) : since;
   const rows = checksOn(draft.rules).filter(row => !row.noReplay);
+  // HOTBOT's proposal on screen in the composer replays on the draft beside the main answer.
   const proposal = useAtomValue(draftProposalAtom), setBridge = useSetAtom(draftBridgeAtom);
   const run = useLab(data, {
+    // A saved strategy replays on its own research's reads of the coins it read and every read of the rest; a copy the same by its source's; a
+    // blank one on every read.
     ...(fresh ? fresh.from ? { strategyId: fresh.from.id } : {} : { strategyId: strategy.id }),
     since, saved: { rules: strategy.rules, dip: strategy.dipPct }, draft: { rules: draft.rules, dip: draft.dip }, coins: true, plans: true, curves: true,
-    ...(own && !fresh ? { tradesFrom: gapFrom, trades: own.flatMap(trade => trade.boughtAt && trade.boughtAt >= gapFrom ? [{ mint: trade.token.address, boughtAt: trade.boughtAt, inSol: trade.inSol, pnlSol: trade.pnlSol }] : []) } : {}),
-    ...(own?.length ? { own: own.flatMap(trade => trade.boughtAt && trade.entryPriceUsd ? [{ id: trade.id, mint: trade.token.address, boughtAt: trade.boughtAt, entryPriceUsd: trade.entryPriceUsd, inSol: trade.inSol, pnlSol: trade.pnlSol }] : []), ownTrail: trailPct(draft.rules.exits) } : {}),
+    // The real side: the strategy's (or the copy's source's) closed trades that the Lab's data holds.
+    ...(fresh ? {} : { gap: true }), ...(fresh && !fresh.from ? {} : { own: true, ownTrail: trailPct(draft.rules.exits) }),
     tips: rows.map(row => ({ key: row.key, steps: row.steps, removable: row.start !== undefined, looserIsLower: looserIsLower(row.key) })),
     ...(proposal ? { proposal } : {}),
   });
@@ -136,7 +134,8 @@ function Studio({ data, home, strategy, strategies, portfolio, fresh, head }: { 
   const suggestOf = (row: CheckRow) => <SuggestIcon row={row} tip={run.tips.get(row.key)} next={next} current={(draft.rules[row.key] as number | undefined) ?? 0} onPick={value => draft.set({ [row.key]: value })}/>;
   const sections = useSettingsSections({ data: home, draft, open, setOpen, evidence, labLoaded: true, planDelta, suggestOf });
   const openCoin = useCallback((pick: Omit<ReplayCoin, 'openedAt'>) => { setCoin({ ...pick, openedAt: Date.now() }); document.getElementById('lab-centre')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, []);
-  const apply = async () => { setSaving(true); const ok = await command({ type: 'update', strategyId: strategy.id, patch: draft.patch }); setSaving(false); if (ok !== false) draft.reset(); };
+  // A Real SOL change that loosens a limit applies after the person confirms it, as in Settings.
+  const applying = useStrategySave(draft, draft.reset);
   const create = async (name: string) => {
     setSaving(true);
     const id = await command({ type: 'labStrategy', name, ...(fresh?.from ? { from: fresh.from.id } : {}), patch: draft.patch });
@@ -144,13 +143,13 @@ function Studio({ data, home, strategy, strategies, portfolio, fresh, head }: { 
     if (typeof id === 'string') router.push(appHref('lab', id));
   };
   // A copy that trades exactly like its source would be refused: only money differs.
-  const twin = fresh?.from && tradesAs({ preset: fresh.from.preset, dipPct: draft.dip, rules: draft.rules }) === tradesAs(fresh.from) ? fresh.from.name : null;
+  const twin = fresh?.from && tradesAs({ dipPct: draft.dip, rules: draft.rules }) === tradesAs(fresh.from) ? fresh.from.name : null;
   const changes = draft.dirty ? describeChanges(draft.patch, strategy.rules, draft.rules, strategy.dipPct) : [];
   const tabs: { id: Tab; name: string }[] = [{ id: 'search', name: 'Search' }, { id: 'shield', name: 'Shield' }, { id: 'sniper', name: 'Sniper' }, { id: 'trader', name: 'Trader' }, { id: 'budget', name: 'Budget' }];
-  const unreplayed = [draft.rules.sellModelPct && 'the sell-or-keep model'].filter((x): x is string => Boolean(x));
+  // What the replay leaves out, said once beside the figures.
   // HOTBOT plans this draft from the composer: every request on the Lab carries what is on screen, and its proposals come back here. A named
   // plan from chat replaces a plan edited by hand (`exits` would otherwise win over `exitPlan` in applyPatch).
-  const context = useMemo(() => main && next ? JSON.stringify(labContext({ strategy, fresh, draft, since, data, main, tips: run.tips, rows, changes, unreplayed })) : null,
+  const context = useMemo(() => main && next ? JSON.stringify(labContext({ strategy, fresh, draft, since, data, main, tips: run.tips, rows, changes })) : null,
     [main, run.tips, draft.rules, draft.dip]); // eslint-disable-line react-hooks/exhaustive-deps
   const replayed = main?.proposal && next ? { key: main.proposal.key, sol: main.proposal.result.totalSol, picks: main.proposal.result.picks, mean: main.proposal.result.mean,
     base: { sol: next.totalSol, picks: next.picks, mean: next.mean } } : null;
@@ -171,8 +170,8 @@ function Studio({ data, home, strategy, strategies, portfolio, fresh, head }: { 
 
   return <div className={`${s.page} ${s.studio}`}>
     {head(strategy, <div className={s.studioHeadEnd}>
-        {fresh ? <CreateBar draft={draft} twin={twin} saving={saving} onCreate={name => void create(name)}/> : draft.dirty && <ApplyBar draft={draft} changes={changes} saving={saving} onApply={() => void apply()}/>}
-        <Hint text={`Rebuilt every hour from the worker’s flow record and the indexer: ${data.coins.toLocaleString()} coins research read since ${day(data.from)}, every read of each, and their 1-second prices.${data.unpriced ? ` ${data.unpriced.toLocaleString()} more had no 1-second prices and are left out.` : ''}`}>
+        {fresh ? <CreateBar draft={draft} twin={twin} saving={saving} onCreate={name => void create(name)}/> : draft.dirty && <ApplyBar draft={draft} changes={changes} saving={applying.saving} onApply={() => void applying.save()}/>}
+        <Hint text={`Rebuilt every hour from the worker’s flow record and the indexer: ${data.coins.toLocaleString()} coins since ${day(data.from)}, every pump.fun launch and every coin research read, each read of them, and their 1-second prices.${data.unpriced ? ` ${data.unpriced.toLocaleString()} more had no 1-second prices and are left out.` : ''}`}>
           <span className={s.studioAsOf}><i aria-hidden data-busy={run.pending || undefined}/>{run.pending ? 'Replaying…' : `Data ${clock(data.builtAt)}`}</span>
         </Hint>
     </div>)}
@@ -196,13 +195,14 @@ function Studio({ data, home, strategy, strategies, portfolio, fresh, head }: { 
           {(!fresh || fresh.from) && <OwnTrades own={own} plans={main?.own} draft={draft} whose={fresh?.from?.name}/>}
           {(!fresh || fresh.from) && <Losses own={own} openCoin={openCoin}/>}
         </section>
-        <CoinList views={main?.coins} own={own} filter={filter} setFilter={setFilter} selected={coin?.mint} onOpen={v => openCoin({ mint: v.mint, symbol: v.symbol, ...(v.logo ? { logo: v.logo } : {}) })} pending={run.pending}/>
+        <CoinList views={main?.coins} own={own} filter={filter} setFilter={setFilter} selected={coin?.mint} onOpen={v => openCoin({ mint: v.mint, symbol: v.symbol })} pending={run.pending}/>
       </div>
       <aside className={`${s.studioSide} ${s.studioResults}`} aria-label="Results">
-        <Verdict strategy={strategy} since={since} now={main?.now} next={next} changed={draft.dirty} size={draft.rules.amountSol} unreplayed={unreplayed} gap={main?.gap} base={fresh ? fresh.from?.name ?? 'Blank' : undefined}
+        <Verdict strategy={strategy} since={since} now={main?.now} next={next} changed={draft.dirty} size={draft.rules.amountSol} gap={main?.gap} base={fresh ? fresh.from?.name ?? 'Blank' : undefined}
           onShow={(label, mints) => setFilter({ id: 'gap', label, mints: new Set(mints) })}/>
       </aside>
     </div>
+    {applying.confirm}
   </div>;
 }
 
@@ -211,9 +211,9 @@ function Studio({ data, home, strategy, strategies, portfolio, fresh, head }: { 
  *  draft made on the Lab's days, the checks that turned coins down, each check's best steps, every plan on the same picks and real against
  *  the Lab. Figures are SOL at the draft's size and returns per trade, rounded. */
 const r3 = (x: number | undefined) => x !== undefined && Number.isFinite(x) ? +x.toFixed(3) : null;
-const brief = (r: Result) => ({ picks: r.picks, bought: r.traded, wonPct: r.traded ? Math.round(100 * r.won / r.traded) : 0, sol: r3(r.totalSol), medianTrade: r3(r.median), meanTradeWithoutBest3: r3(r.meanTrim), likelyTradeRange: [r3(r.low), r3(r.high)], noRoom: r.full, noEntry: r.expired + r.chased, stillHeld: r.open });
-function labContext({ strategy, fresh, draft, since, data, main, tips, rows, changes, unreplayed }: { strategy: StrategyRow; fresh?: { from: StrategyRow | null }; draft: SettingsDraft; since: number; data: LabMeta;
-  main: NonNullable<ReturnType<typeof useLab>['main']>; tips: Map<string, Tip>; rows: CheckRow[]; changes: string[]; unreplayed: string[] }) {
+const brief = (r: Result) => ({ picks: r.picks, bought: r.traded, wonPct: r.traded ? Math.round(100 * r.won / r.traded) : 0, sol: r3(r.totalSol), medianTrade: r3(r.median), meanTradeWithoutBest3: r3(r.meanTrim), likelyTradeRange: [r3(r.low), r3(r.high)], noRoom: r.full, noEntry: r.expired + r.chased + r.quiet + r.dropped, rebuys: r.rebuys, stillHeld: r.open });
+function labContext({ strategy, fresh, draft, since, data, main, tips, rows, changes }: { strategy: StrategyRow; fresh?: { from: StrategyRow | null }; draft: SettingsDraft; since: number; data: LabMeta;
+  main: NonNullable<ReturnType<typeof useLab>['main']>; tips: Map<string, Tip>; rows: CheckRow[]; changes: string[] }) {
   const next = main.next, rules = draft.rules, planId = planIdOf(draft);
   return {
     name: strategy.name, rules, dip: draft.dip,
@@ -221,7 +221,7 @@ function labContext({ strategy, fresh, draft, since, data, main, tips, rows, cha
     window: { from: new Date(since).toISOString(), to: new Date(data.builtAt).toISOString(), coinsRead: main.coins?.length ?? null },
     draftChanges: changes,
     checks: rows.map(row => ({ key: row.key, name: row.name, value: (rules[row.key] as number | undefined) ?? 0 })),
-    entry: { dipPct: draft.dip, watchMinutes: rules.entryDelayMinutes ?? 0, skipIfUpPct: rules.entryMaxUpPct ?? 0 },
+    entry: { dipPct: draft.dip, watchMinutes: rules.entryDelayMinutes ?? 0, skipIfUpPct: rules.entryMaxUpPct ?? 0, breakout: rules.breakout ?? null, tradingHoursUtc: rules.tradingHours ?? null, tradingDays: rules.tradingDays ?? null },
     exit: { plan: rules.exits.name, planId: planId ?? null, trailPct: trailPct(rules.exits) ?? null, words: describeExits(rules.exits) },
     size: { perCoinSol: rules.amountSol, coinsAtOnce: rules.maxOpenPositions, budgetSol: rules.allocationSol },
     results: { saved: brief(main.now), draft: brief(next) },
@@ -233,7 +233,7 @@ function labContext({ strategy, fresh, draft, since, data, main, tips, rows, cha
       labPicksItNeverBought: { coins: main.gap.labOnly.mints.length, labSol: r3(main.gap.labOnly.labSol) },
       boughtLabTurnsDown: { coins: main.gap.realOnly.mints.length, realSol: r3(main.gap.realOnly.realSol), mostlyFor: main.gap.realOnly.why.slice(0, 3).map(w => ({ why: w.key, coins: w.count, realSol: r3(w.realSol) })) },
       both: { coins: main.gap.both.mints.length, labSol: r3(main.gap.both.labSol), realSol: r3(main.gap.both.realSol) } } } : {}) } }),
-    notReplayed: ['TraderBot’s own sales', 're-buys', ...unreplayed],
+    notReplayed: ['TraderBot’s own sales', 're-buys'],
   };
 }
 
@@ -289,18 +289,18 @@ const passes = (filter: Filter, v: CoinView) => filter.id === 'gap' ? filter.min
 /** The return a coin's row reads: the pick's own trade, else what it did bought at its read. */
 const resultOf = (v: CoinView) => v.out?.status === 'traded' && !v.out.full ? v.out.ret : v.market.status === 'traded' ? v.market.ret : undefined;
 
-/** Every coin read in the period in a few figures, live as the draft changes: how many research read, picked (and how many more or fewer than
+/** Every coin read in the period in a few figures, live as the draft changes: how many were read, picked (and how many more or fewer than
  *  the saved rules), bought and turned down, and how the picks and the turned-down coins did had each been bought at its read. */
 function Overview({ views, next, now, filter, setFilter }: { views?: CoinView[]; next?: Result; now?: Result; filter: Filter; setFilter: (filter: Filter) => void }) {
   if (!views || !next || !now) return <section className={`${s.surface} ${s.labOverview}`} data-loading aria-label="Every coin"><div className={s.labRowsLoading}/></section>;
   const picks = views.filter(v => v.verdict === 'pick'), down = views.filter(v => v.verdict !== 'pick'), changed = views.filter(FILTERS.find(f => f.id === 'changed')!.test);
-  const skipped = next.full + next.expired + next.chased;
+  const skipped = next.full + next.expired + next.chased + next.dropped;
   const tile = (id: FilterId, label: string, value: ReactNode, sub: ReactNode) => <button type="button" className={s.labStage} aria-pressed={filter.id === id} onClick={() => setFilter({ id: filter.id === id && id !== 'all' ? 'all' : id })}><small>{label}</small><b>{value}</b><span>{sub}</span></button>;
   return <section className={`${s.surface} ${s.labOverview}`} aria-label="Every coin">
     <div className={s.labStages}>
-      {tile('all', 'Researched', views.length.toLocaleString(), `${views.filter(v => v.recheck).length} on a re-check`)}
+      {tile('all', 'Coins', views.length.toLocaleString(), `${views.filter(v => v.recheck).length} on a re-check`)}
       {tile('picks', 'Picked', picks.length.toLocaleString(), now.picks !== next.picks ? <em data-tone={next.picks > now.picks ? 'up' : 'down'}>{next.picks > now.picks ? '+' : '−'}{Math.abs(next.picks - now.picks)} vs saved</em> : `${changed.length} changed`)}
-      {tile('bought', 'Bought', next.traded.toLocaleString(), skipped ? `${next.full} no room · ${next.expired + next.chased} no entry` : 'every pick')}
+      {tile('bought', 'Bought', next.traded.toLocaleString(), skipped ? `${next.full} no room · ${next.expired + next.chased + next.dropped} no entry` : 'every pick')}
       {tile('down', 'Turned down', down.length.toLocaleString(), `${down.filter(v => (v.high ?? 0) >= 1).length} doubled in 4h`)}
     </div>
     <div className={s.labCohorts}>
@@ -323,12 +323,14 @@ function Cohort({ label, views }: { label: string; views: CoinView[] }) {
   </div>;
 }
 
+/** The period at a glance: real profit, the saved rules and the draft as trades closed; the draft's positions from their buy; and every coin
+ *  by its cap or age at the read. Over the period, each sale is a pin on its line (`SalePins`) whose card opens the coin's replay. */
 type CurveView = 'time' | 'buy' | 'cap' | 'age';
 const minutesText = (m: number) => m >= 60 ? `${+(m / 60).toFixed(1)}h` : `${m}m`;
 type LineKey = 'real' | 'saved' | 'draft';
 type TimeRow = { at: number } & Partial<Record<LineKey, number>>;
 /** A sale on the chart: the coin, what it made, the line it moved and that line's value once it sold. */
-type Sale = { id: string; line: LineKey; mint: string; symbol: string; logo?: string; ret: number; sol: number; at: number; value: number };
+type Sale = { id: string; line: LineKey; mint: string; symbol: string; ret: number; sol: number; at: number; value: number };
 /** Pins in px, matching the coin chart's clouds (`--stem` 16): a head's top sits `rise` from its dot. Sales within `nearX` and `nearY` of a
  *  pin's first sale on the same line share it, so one line's heads never touch; two lines' heads closer than `width` and `nearY` don't both rise. */
 const PIN = { stem: 16, rise: 42, nearX: 40, nearY: 40, width: 40 };
@@ -374,20 +376,22 @@ function PinScope({ sales, children }: { sales: Sale[]; children: ReactNode }) {
 }
 /** The pins at a px on the time axis: the pointer's time lights them and lists their sales in the tooltip. */
 const pinsAt = (groups: PinGroup[], px: number | undefined) => px === undefined || !Number.isFinite(px) ? [] : groups.filter(g => px >= g.from - 6 && px <= g.to + 6);
-const avatar = (sale: Sale, size: string) => <TokenAvatar className={`${size} rounded-full`} address={sale.mint} logoUrl={sale.logo} symbol={sale.symbol} network="solana" fallback="letter" disableDetailFallback/>;
+const avatar = (sale: Sale, size: string) => <TokenAvatar className={`${size} rounded-full`} address={sale.mint} symbol={sale.symbol}/>;
 type PinProps = { group: PinGroup; near: boolean; open: boolean; tipX: 'start' | 'center' | 'end'; names: Record<LineKey, string>; onShow: (id: string) => void; onHide: (id: string) => void; onOpen: (sale: Sale) => void };
 /** One pin: its head with the stem to its dot; lit, it shows its sales' dots, and open, its card of sales. Memoised, so the pointer moving
  *  across the chart renders only the pins it lights or leaves. */
 const Pin = memo(function Pin({ group, near, open, tipX, names, onShow, onHide, onOpen }: PinProps) {
-  const { id, first, sales, x, y, up, tipY, room, dots } = group, count = sales.length, openAtTap = useRef(false);
+  const { id, first, sales, x, y, up, tipY, room, dots } = group, count = sales.length, tap = useRef<{ touch: boolean; wasOpen: boolean } | null>(null);
+  // The card opens by pointing (a mouse), by the first tap (a finger; the second opens a replay) or by focus (the keyboard). The finger is read
+  // on pointerdown, because iOS Safari reports a tap's click as a mouse's.
   return <div className={s.cloudMark} data-line={first.line === 'real' ? 'real' : 'lab'} data-tone={toneOf(first.sol)} data-lead="" data-side={up ? 'up' : 'down'} data-tip-y={tipY} data-tip-x={tipX} data-near={near || undefined} data-open={open || undefined}
     style={{ '--stem': `${PIN.stem}px`, '--room': `${room}px`, '--ring': RING[toneOf(sales[0].sol) ?? 'flat'], transform: `translate(${x}px, ${y}px)` } as CSSProperties}
     onPointerEnter={event => { if (event.pointerType === 'mouse') onShow(id); }} onPointerLeave={event => { if (event.pointerType === 'mouse') onHide(id); }}
     onFocus={() => onShow(id)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) onHide(id); }}>
     {near && dots.map(({ sale, dx, dy }) => <i key={sale.id} className={s.labDot} data-tone={toneOf(sale.sol)} style={{ left: dx, top: dy }}/>)}
     <i className={s.cloudDot}/><i className={s.cloudStem}/>
-    <button type="button" className={s.cloudBot} onPointerDown={() => { openAtTap.current = open; }}
-      onClick={event => { if ((event.nativeEvent as PointerEvent).pointerType === 'touch' && !openAtTap.current) onShow(id); else onOpen(sales[0]); }} aria-label={count > 1 ? `${count} sales here; replay ${sales[0].symbol}, the biggest` : `Replay ${first.symbol} ${pc(first.ret)} · ${signedSol(first.sol, 3)}`}>
+    <button type="button" className={s.cloudBot} onPointerDown={event => { tap.current = { touch: event.pointerType === 'touch', wasOpen: open }; }}
+      onClick={() => { const pressed = tap.current; tap.current = null; if (pressed?.touch && !pressed.wasOpen) onShow(id); else onOpen(sales[0]); }} aria-label={count > 1 ? `${count} sales here; replay ${sales[0].symbol}, the biggest` : `Replay ${first.symbol} ${pc(first.ret)} · ${signedSol(first.sol, 3)}`}>
       <span>{avatar(sales[0], 'size-[22px]')}</span>{count > 1 && <b>{count > 99 ? '99+' : count}</b>}
     </button>
     {open && <div className={s.cloudTip} role="tooltip"><PinCard sales={sales} names={names} onOpen={onOpen}/></div>}
@@ -404,12 +408,14 @@ function PinCard({ sales, names, onOpen }: { sales: Sale[]; names: Record<LineKe
     </button>)}
   </div>;
 }
+/** The period's sales as the coin chart's clouds, faint until the pointer is on them or at their time; a pin's card lists its sales and opens
+ *  each one's replay. HTML over the chart (`host`), each pin keyed by its first sale's id, so a regroup or a new price never remounts a logo. */
 function SalePins({ host, names, onOpen }: { host: HTMLElement | null; names: Record<LineKey, string>; onOpen: (coin: Omit<ReplayCoin, 'openedAt'>) => void }) {
   const groups = useContext(PinsContext), x = useXAxisScale(), width = useChartWidth() ?? 0, label = useActiveTooltipLabel();
   // The pin whose card is open: it replaces the pointer's time as the lit one.
   const [shown, setShown] = useState<string>();
   const onShow = useCallback((id: string) => setShown(id), []), onHide = useCallback((id: string) => setShown(now => now === id ? undefined : now), []);
-  const open = useCallback((sale: Sale) => onOpen({ mint: sale.mint, symbol: sale.symbol, logo: sale.logo }), [onOpen]);
+  const open = useCallback((sale: Sale) => onOpen({ mint: sale.mint, symbol: sale.symbol }), [onOpen]);
   if (!host || !groups.length) return null;
   const lit = shown ? [shown] : pinsAt(groups, label === undefined ? undefined : x?.(Number(label))).map(g => g.id);
   // A card is at most 17rem (about 240px) wide: centred on its pin where that fits the chart, else running away from the nearer edge.
@@ -427,7 +433,7 @@ function TimeTip({ label, rows, lines, names, tints }: { label?: unknown; rows: 
   return <div className={s.labTip}><b>{day(at)}</b>
     {lines.map(key => { const v = valueAt(key); return v === undefined ? null : <span key={key}><i data-key={tints[key]}/>{names[key]}<b data-tone={toneOf(v)}>{signedSol(v, 2)}</b></span>; })}
     {here.length > 0 && <small>Sold here</small>}
-    {here.slice(0, 5).map(sale => <span key={sale.id} className={s.labTipCoin}><i data-key={tints[sale.line]}/><TokenAvatar className="size-4 rounded-full" address={sale.mint} logoUrl={sale.logo} symbol={sale.symbol} network="solana" fallback="letter" disableDetailFallback/>{sale.symbol}<b data-tone={toneOf(sale.sol)}>{pc(sale.ret)}</b></span>)}
+    {here.slice(0, 5).map(sale => <span key={sale.id} className={s.labTipCoin}><i data-key={tints[sale.line]}/><TokenAvatar className="size-4 rounded-full" address={sale.mint} symbol={sale.symbol}/>{sale.symbol}<b data-tone={toneOf(sale.sol)}>{pc(sale.ret)}</b></span>)}
     {here.length > 5 && <small>+{here.length - 5} more</small>}
   </div>;
 }
@@ -476,8 +482,8 @@ function Curves({ curves, strategy, since, changed, own, real, onOpen }: { curve
     const sold = (own ?? []).filter(trade => trade.closedAt > since).sort((a, b) => a.closedAt - b.closedAt);
     const sales: Sale[] = [], ids = new Set<string>();
     const add = (sale: Omit<Sale, 'id'>) => { let key = `${sale.line}:${sale.mint}:${sale.at}`; while (ids.has(key)) key += '+'; ids.add(key); sales.push({ ...sale, id: key }); };
-    for (const trade of sold) add({ line: 'real', mint: trade.token.address, symbol: trade.token.symbol, logo: trade.token.logoUri, ret: trade.changePct / 100, sol: trade.pnlSol, at: trade.closedAt, value: realAt(trade.closedAt) });
-    for (const p of curves[lab]) add({ line: lab, mint: p.mint, symbol: p.symbol || p.mint.slice(0, 4), logo: p.logo, ret: p.ret, sol: p.sol, at: p.at, value: p.total });
+    for (const trade of sold) add({ line: 'real', mint: trade.token.address, symbol: trade.token.symbol, ret: trade.changePct / 100, sol: trade.pnlSol, at: trade.closedAt, value: realAt(trade.closedAt) });
+    for (const p of curves[lab]) add({ line: lab, mint: p.mint, symbol: p.symbol || p.mint.slice(0, 4), ret: p.ret, sol: p.sol, at: p.at, value: p.total });
     const rows: TimeRow[] = [{ at: since, ...(real ? { real: 0 } : {}), saved: 0, draft: 0 }, ...(real ? line.slice(1) : []), ...sold.map(trade => ({ at: trade.closedAt, real: realAt(trade.closedAt) })),
       ...curves.saved.map(p => ({ at: p.at, saved: p.total })), ...(changed ? curves.draft.map(p => ({ at: p.at, draft: p.total })) : [])];
     return { rows: rows.sort((a, b) => a.at - b.at), sales };
@@ -522,7 +528,7 @@ function Segments({ rows, by }: { rows: CurveData['cap']; by: 'cap' | 'age' }) {
 const SORTS = [{ id: 'new', name: 'Newest' }, { id: 'win', name: 'Winners' }, { id: 'loss', name: 'Losers' }, { id: 'run', name: 'Biggest run' }] as const;
 type Sort = typeof SORTS[number]['id'];
 const PAGE = 50;
-/** Every coin with its decision and outcome: when research read it and at what cap, the draft's verdict (and whether it changed from the
+/** Every coin with its decision and outcome: when it was read and at what cap, the draft's verdict (and whether it changed from the
  *  saved rules), the trade or why there was none, the result, the run in 4 hours and what the strategy really made on it. */
 function CoinList({ views, own, filter, setFilter, selected, onOpen, pending }: { views?: CoinView[]; own?: OwnTrade[]; filter: Filter; setFilter: (filter: Filter) => void; selected?: string; onOpen: (view: CoinView) => void; pending: boolean }) {
   const [sort, setSort] = useState<Sort>('new'), [shown, setShown] = useState(PAGE);
@@ -541,20 +547,19 @@ function CoinList({ views, own, filter, setFilter, selected, onOpen, pending }: 
       <div className={s.seg} role="group" aria-label="Sort">{SORTS.map(o => <button type="button" key={o.id} aria-pressed={sort === o.id} onClick={() => setSort(o.id)}>{o.name}</button>)}</div>
     </div>
     {!views ? <div className={s.labRowsLoading} role="status" aria-label="Replaying every coin"/> : !rows.length ? <p className={s.empty}>No coin here on these settings.</p> : <>
-      <div className={s.coinRows} role="table" aria-label="Coins">
+      <Paged status={rows.length > shown ? 'CanLoadMore' : 'Exhausted'} size={shown} onMore={() => setShown(n => n + PAGE)}><div className={s.coinRows} role="table" aria-label="Coins">
         <div role="row" className={s.coinRowsHead}><span role="columnheader">Coin</span><span role="columnheader">Read</span><span role="columnheader">Cap</span><span role="columnheader">Draft</span><span role="columnheader">Trade</span><span role="columnheader">Result</span><span role="columnheader">4h run</span><span role="columnheader">Real</span></div>
         {rows.slice(0, shown).map(v => <CoinLine key={v.mint} v={v} real={real.get(v.mint)} selected={selected === v.mint} onOpen={onOpen}/>)}
-      </div>
-      {rows.length > shown && <button type="button" className={s.labMore} onClick={() => setShown(n => n + PAGE)}>Show {Math.min(PAGE, rows.length - shown)} more of {rows.length.toLocaleString()}</button>}
+      </div></Paged>
     </>}
   </section>;
 }
 function CoinLine({ v, real, selected, onOpen }: { v: CoinView; real?: { pnl: number; in: number }; selected: boolean; onOpen: (view: CoinView) => void }) {
   const cap = v.cap, out = v.out, bought = out?.status === 'traded' && !out.full, r = resultOf(v);
   const flip = v.before !== null && (v.before === 'pick') !== (v.verdict === 'pick') ? v.verdict === 'pick' ? 'in' : 'out' : undefined;
-  const trade = !out ? null : out.full ? 'No room' : out.status === 'expired' ? 'No dip' : out.status === 'chased' ? 'Ran up' : out.status === 'nodata' ? 'No prices' : out.open ? 'Held' : out.reason ?? 'Sold';
+  const trade = !out ? null : out.full ? 'No room' : out.status === 'expired' ? 'No entry' : out.status === 'chased' ? 'Ran up' : out.status === 'dropped' ? 'Failed a recheck' : out.status === 'quiet' ? 'Quiet' : out.status === 'nodata' ? 'No prices' : out.open ? 'Held' : out.reason ?? 'Sold';
   return <button type="button" role="row" className={s.labLine} data-selected={selected || undefined} data-flip={flip} onClick={() => onOpen(v)}>
-    <span role="cell" className={s.labCoin}><TokenAvatar className="size-7 rounded-[28%]" address={v.mint} logoUrl={v.logo} symbol={v.symbol} network="solana" fallback="letter" disableDetailFallback/><b>{v.symbol || v.mint.slice(0, 4)}</b></span>
+    <span role="cell" className={s.labCoin}><TokenAvatar className="size-7 rounded-[28%]" address={v.mint} symbol={v.symbol}/><b>{v.symbol || v.mint.slice(0, 4)}</b></span>
     <span role="cell" className={s.labMuted}>{day(v.readAt)}</span>
     <span role="cell">{cap ? usd(cap) : '–'}</span>
     <span role="cell" className={s.labVerdictCell}><span className={s.labVerdict} data-verdict={v.verdict}>{v.verdict === 'pick' ? <><Check/>Pick</> : checkLabel(v.check ?? 'fit')}</span>{flip ? <small className={s.labTag} data-flip={flip}>{flip === 'in' ? 'new' : 'dropped'}</small> : v.recheck ? <small className={s.labTag}>re-check</small> : null}</span>
@@ -569,7 +574,7 @@ function CoinLine({ v, real, selected, onOpen }: { v: CoinView; real?: { pnl: nu
 /** Real against the Lab on the same dates, then why they differ coin by coin: picks the strategy never bought, coins it bought the Lab turns
  *  down, and the coins both have. Each part opens its coins in the list. */
 /** `base`: a strategy not made yet, named by what it started from; it has no real side and compares the draft with that start. */
-function Verdict({ strategy, since, now, next, changed, size, unreplayed, gap, base, onShow }: { strategy: StrategyRow; since: number; now?: Result; next?: Result; changed: boolean; size: number; unreplayed: string[]; gap?: Gap; base?: string; onShow: (label: string, mints: string[]) => void }) {
+function Verdict({ strategy, since, now, next, changed, size, gap, base, onShow }: { strategy: StrategyRow; since: number; now?: Result; next?: Result; changed: boolean; size: number; gap?: Gap; base?: string; onShow: (label: string, mints: string[]) => void }) {
   const real = realSince(strategy, since), r = changed ? next : now;
   return <section className={`${s.surface} ${s.studioVerdict}`} aria-label={base ? 'The Lab' : 'Real against the Lab'}>
     <BlockHead title={base ? 'If it had run' : 'Real against the Lab'} note={`since ${day(since)}`}/>
@@ -577,12 +582,11 @@ function Verdict({ strategy, since, now, next, changed, size, unreplayed, gap, b
       {!base && <Hint text={`What ${strategy.name} made since ${day(since)}: sold coins plus what it holds at the latest prices.`}>
         <div className={s.studioFigure} data-real><small>Real</small><b className={s[toneOf(real) ?? 'muted']}>{sol2(real)}<em>SOL</em></b></div>
       </Hint>}
-      {now && <Hint text={`Every coin ${base ? 'research' : 'its research'} read since ${day(since)} that ${base ? 'these rules' : 'the saved rules'} pick, entered by SniperBot's entry and sold by the exit plan alone with the worker's fills on 1-second prices, at its own size (up to ${size} SOL a coin, by research's confidence and the pool) and its coins-at-once limit. TraderBot's own sales and re-buys aren't replayed.`}>
+      {now && <Hint text={`Every pump.fun launch and every coin research read since ${day(since)} that ${base ? 'these rules' : 'the saved rules'} pick, entered by SniperBot's entry and sold by the exit plan alone with the worker's fills on 1-second prices, at its own size (up to ${size} SOL a coin, by research's confidence and the pool) and its coins-at-once limit. TraderBot's own sales and re-buys aren't replayed.`}>
         <div><Figure label={base ? changed ? base : 'Lab' : changed ? 'Lab, saved' : 'Lab'} result={now} muted={changed}/></div>
       </Hint>}
       {changed && next && now && <><span className={s.studioArrow} data-tone={toneOf(next.totalSol - now.totalSol)}><ArrowRight/><b>{signedSol(next.totalSol - now.totalSol, 2)}</b></span><Figure label="Lab, draft" result={next} accent/></>}
     </div>
-    {unreplayed.length > 0 && <p className={s.labNote}>Lab replays do not include {unreplayed.join(' or ')}.</p>}
     {gap && <GapParts gap={gap} onShow={onShow}/>}
     {r && <dl className={s.studioFacts}>
       <Fact label="Median trade" value={pc(r.median)} tone={toneOf(r.median)} hint="The middle trade's return: what a typical coin did."/>
@@ -616,6 +620,7 @@ function Fact({ label, value, tone, hint }: { label: string; value: ReactNode; t
   const body = <><dt>{label}</dt><dd data-tone={tone}>{value}</dd></>;
   return hint ? <Hint text={hint}><div className={s.studioFact}>{body}</div></Hint> : <div className={s.studioFact}>{body}</div>;
 }
+/** The trailing stop the plan columns replay at, set in the draft (0: none); a stop set outside these steps on Settings (5–49%) stays listed. */
 function TrailPick({ draft }: { draft: SettingsDraft }) {
   const trail = trailPct(draft.rules.exits) ?? 0, choices = [...new Set<number>([0, ...TRAIL.choices, trail])].sort((a, b) => a - b);
   return <Select value={String(trail)} onValueChange={value => draft.set({ stopLossPct: Number(value) })}>
@@ -647,9 +652,9 @@ function Plans({ plans, next, draft, trail }: { plans?: { id: string; result: Re
 /** The strategy's own sold coins under every plan at the draft's trail, against what they made: the server Lab holds each from its real buy and fill. */
 function OwnTrades({ own, plans, draft, whose }: { own?: OwnTrade[]; plans?: OwnPlans; draft: SettingsDraft; whose?: string }) {
   const current = planIdOf(draft);
-  const head = <BlockHead title={whose ? `${whose}’s sold coins` : 'Its sold coins'} hint={own?.length && plans ? `${plans.covered} of ${own.length >= OWN_LIMIT ? `the latest ${OWN_LIMIT}` : own.length} sold coins have prices. Every plan replays from their real buys and fills at this trailing stop.` : undefined}><TrailPick draft={draft}/></BlockHead>;
-  if (!own || (own.length && !plans)) return <div className={s.labCol}>{head}<div className={s.labRowsLoading}/></div>;
-  if (!own.length || !plans) return <div className={s.labCol}>{head}<p className={s.empty}>Nothing sold yet.</p></div>;
+  const head = <BlockHead title={whose ? `${whose}’s sold coins` : 'Its sold coins'} hint={plans?.total ? `${plans.covered} of the ${plans.total} sold coins in the Lab’s days have prices. Every plan replays from their real buys and fills at this trailing stop.` : undefined}><TrailPick draft={draft}/></BlockHead>;
+  if (!plans && own?.length !== 0) return <div className={s.labCol}>{head}<div className={s.labRowsLoading}/></div>;
+  if (!plans?.total) return <div className={s.labCol}>{head}<p className={s.empty}>Nothing sold yet.</p></div>;
   return <div className={s.labCol}>
     {head}
     <ol className={`${s.studioLedger} ${s.labColBody}`}>
@@ -666,6 +671,7 @@ function OwnTrades({ own, plans, draft, whose }: { own?: OwnTrade[]; plans?: Own
   </div>;
 }
 
+/** Where this strategy's money went: its sold coins by why they sold, losses first, and the worst of them to replay. */
 function Losses({ own, openCoin }: { own?: OwnTrade[]; openCoin: (coin: Omit<ReplayCoin, 'openedAt'>) => void }) {
   const groups = useMemo(() => own ? byExit(own) : [], [own]);
   const head = <BlockHead title="Where the money went" hint={own?.length ? `${own.length} sold coins by why they sold, losses first. Each row: coins lost of coins sold.` : undefined}/>;
@@ -679,7 +685,7 @@ function Losses({ own, openCoin }: { own?: OwnTrade[]; openCoin: (coin: Omit<Rep
         <small title={`${group.lost} of ${group.trades.length} lost`}>{group.lost ? <em>{group.lost}</em> : 0}/{group.trades.length}</small>
         <b className={s[toneOf(group.sol) ?? 'muted']}>{signedSol(group.sol, 2)}</b>
       </li>)}</ol>
-      {worst.length > 0 && <div className={s.studioWorst}><small>Worst</small>{worst.map(trade => <CoinPill key={trade.id} onClick={() => openCoin({ mint: trade.token.address, symbol: trade.token.symbol, logo: trade.token.logoUri })} coins={[{ symbol: trade.token.symbol, logo: trade.token.logoUri, address: trade.token.address }]} note={signedSol(trade.pnlSol, 2)} tone="down"/>)}</div>}
+      {worst.length > 0 && <div className={s.studioWorst}><small>Worst</small>{worst.map(trade => <CoinPill key={trade.id} onClick={() => openCoin({ mint: trade.token.address, symbol: trade.token.symbol })} coins={[{ symbol: trade.token.symbol, address: trade.token.address }]} note={signedSol(trade.pnlSol, 2)} tone="down"/>)}</div>}
     </div>
   </div>;
 }

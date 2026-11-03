@@ -78,8 +78,11 @@ function DialogContent({
           }
         }}
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid max-h-[calc(90dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto w-full max-w-[calc(100%-2em)] translate-x-[-50%] translate-y-[-50%] gap-[1em] rounded-[calc(1.5em*var(--r-scale))] border bg-popover backdrop-blur-sm p-[1.5em] shadow-xl duration-250 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
-          layout === "panel" && "flex h-[min(44em,calc(100dvh-2em))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[48em] [&>[data-slot=dialog-header]]:border-b [&>[data-slot=dialog-header]]:p-[1.5em] [&>[data-slot=dialog-header]]:pr-[4em] [&>[data-slot=dialog-footer]]:border-t [&>[data-slot=dialog-footer]]:p-[1em]",
+          "fixed top-[calc(var(--view-top)+var(--view-h)/2)] left-[50%] z-50 grid max-h-[calc(var(--view-h)-2em)] overflow-y-auto w-full max-w-[calc(100%-2em)] translate-x-[-50%] translate-y-[-50%] gap-[1em] rounded-[calc(1.5em*var(--r-scale))] bg-[var(--menu-bg)] backdrop-blur-sm [--dialog-pad:1.5em] [--dialog-pad-bottom:var(--dialog-pad)] p-[var(--dialog-pad)] pb-[var(--dialog-pad-bottom)] shadow-[var(--menu-shadow)] duration-250 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // Phones: a sheet the full width of the screen, standing on its bottom edge (or on the keyboard), with a fill that runs on below it for
+          // where iOS draws it too high.
+          layout === "flow" && "max-sm:inset-x-0 max-sm:top-auto max-sm:bottom-[var(--view-bottom)] max-sm:max-h-[calc(var(--view-h)+var(--view-gap-bottom)-0.75em)] max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:[--dialog-pad:1.25em] max-sm:[--dialog-pad-bottom:calc(var(--dialog-pad)+var(--view-gap-bottom))] max-sm:shadow-[var(--sheet-shadow),0_6em_0_0_var(--menu-bg)] max-sm:data-[state=open]:zoom-in-100 max-sm:data-[state=closed]:zoom-out-100 max-sm:data-[state=open]:slide-in-from-bottom max-sm:data-[state=closed]:slide-out-to-bottom",
+          layout === "panel" && "flex h-[min(44em,calc(var(--view-h)-2em))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[48em] [&>[data-slot=dialog-header]]:border-b [&>[data-slot=dialog-header]]:p-[1.5em] [&>[data-slot=dialog-header]]:pr-[4em] [&>[data-slot=dialog-footer]]:border-t [&>[data-slot=dialog-footer]]:p-[1em]",
           className
         )}
         {...props}
@@ -109,8 +112,9 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** The part of a padless DialogContent (`p-0`, a flex column) that scrolls, above a footer or dock that stays. */
 function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="dialog-body" className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-[1.5em]", className)} {...props} />
+  return <div data-slot="dialog-body" className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-[var(--dialog-pad)]", className)} {...props} />
 }
 
 function DialogFooter({

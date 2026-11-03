@@ -1,21 +1,16 @@
 import type { TradePresetTargetConfig } from '../convex/lib/tradePresets';
 
-/** How a strategy sells. Code runs the plan on price; TraderBot may sell earlier or tighten, never loosen.
- *  Stored in `rules.exits`: take-profits sell a share of the original bag at a gain (or, with `pullbackPct`, once the coin
- *  has reached that gain and then falls that far below its high), then `scaleOut` keeps selling a share at every further step up;
- *  stop-losses sell the rest, measured below the entry or, when `trailing`, below the high since the buy, and only once the coin has
- *  been up `armAtGainPct` or held `afterMinutes` (a 0% stop after 10 minutes sells a coin that isn't up by then); `lockStepPct` locks in
- *  the step below each step climbed, and `stall` sells a coin that stops making new highs. */
 export type ExitPlan = TradePresetTargetConfig;
 export const EXIT_PLAN_IDS = ['clip', 'stake', 'flip', 'ladder', 'trailingTp', 'trail', 'scaleOut', 'scalp', 'take30', 'stall', 'stepLock', 'tighten', 'doubling'] as const;
 export type ExitPlanId = typeof EXIT_PLAN_IDS[number];
-/** A strategy's trailing stop (`TRAIL`): the one always-on untimed trail in `stopLosses`, measured below the high since the buy. Presets start
- *  it at `Preset.trailPct`, so it is on unless someone turns it off in Settings (`StrategyPatch.stopLossPct` 0); people change it there or by
+/** A strategy's trailing stop (`TRAIL`): the one always-on untimed trail in `stopLosses`, measured below the high since the buy. A new strategy
+ *  starts with one (types/team.ts `startRules`), so it is on unless someone turns it off in Settings (`StrategyPatch.stopLossPct` 0); people change it there or by
  *  telling HOTBOT a stop, and TraderBot only ever tightens it. A plan is what happens above it, so no plan carries one of its own; `exitPlan`
  *  composes the two. */
 export const TRAIL = { min: 5, max: 49, choices: [10, 15, 20, 25, 30] } as const;
 const trail = (pct: number, armAtGainPct?: number) => ({ lossPct: pct, sellPct: 100, trailing: true, trailDistancePct: pct, ...(armAtGainPct ? { armAtGainPct } : {}) });
 const atBuyAfter = (minutes: number) => ({ lossPct: 0, sellPct: 100, afterMinutes: minutes });
+/** Clip's time stop: the buy price if the coin isn't up after 10 minutes. */
 const floor = [atBuyAfter(10)];
 const afterFloor = ' and sells at the buy price if it isn’t up after 10 minutes';
 export const EXIT_PLANS: Record<ExitPlanId, { summary: string; exits: Omit<ExitPlan, 'sellSlippageBps'> }> = {
@@ -37,14 +32,25 @@ export const EXIT_PLANS: Record<ExitPlanId, { summary: string; exits: Omit<ExitP
 };
 /** How many plans of their own a person keeps (`userSettings.exitPlans`, saved from Settings → Trader). */
 export const SAVED_PLANS = { max: 12, nameLength: 40 } as const;
+/** The most take-profits and stop-losses one plan holds: every held coin's book row carries its strategy's plan, and the exit engine walks it on
+ *  each price. Stop-losses count the trailing stop. */
+export const EXIT_RUNGS = { takeProfits: 8, stopLosses: 8 } as const;
+/** The least a scale-out sells per step: the ladder walks at most 100 / this many steps (`soldOutAtPct`). */
+export const SCALE_OUT_MIN_SELL_PCT = 1;
 /** The plans as people pick them, by how they sell. Every plan is in exactly one group. */
 export const EXIT_PLAN_GROUPS: { label: string; ids: ExitPlanId[] }[] = [
   { label: 'Gets out early', ids: ['clip', 'scaleOut', 'scalp', 'take30', 'flip'] },
   { label: 'Locks in gains', ids: ['stall', 'stepLock', 'tighten', 'trail'] },
   { label: 'Rides runners', ids: ['stake', 'ladder', 'trailingTp', 'doubling'] },
 ];
+type Stop = ExitPlan['stopLosses'][number];
 /** The always-on trailing stop: trailing, armed by neither a gain nor time. */
-export const isTrail = (sl: ExitPlan['stopLosses'][number]) => Boolean(sl.trailing) && !sl.armAtGainPct && !sl.afterMinutes;
+export const isTrail = (sl: Stop) => Boolean(sl.trailing) && !sl.armAtGainPct && !sl.afterMinutes;
+/** A trail step: a trail armed by a gain that sells `sellPct` of the original bag, once, rather than the rest. A plan's steps sell in any
+ *  order, each when the price falls through its own trail. */
+export const isTrailStep = (sl: Stop) => Boolean(sl.trailing && sl.armAtGainPct) && sl.sellPct < 100;
+/** The plan's trail steps in plan order: a step's place here is its bit in `trailsSold`. */
+export const trailSteps = (plan: Pick<ExitPlan, 'stopLosses'>) => plan.stopLosses.filter(isTrailStep);
 /** The strategy's trailing stop: the distance of its always-on untimed trail (the tightest, if an edited plan carries more than one). */
 export function trailPct(plan: Pick<ExitPlan, 'stopLosses'>): number | undefined {
   const rows = plan.stopLosses.filter(isTrail).map(sl => sl.trailDistancePct ?? sl.lossPct);
@@ -62,11 +68,11 @@ export function exitPlan(id: ExitPlanId, sellSlippageBps: number, trailPct: numb
   return trailPct ? withTrail(plan, trailPct) : plan;
 }
 
-/** A held coin as the plan sees it: its entry, the high since the buy, how many take-profits have sold, how long it has been held and how
- *  long since its high (without `heldMs`, stops armed by time stay off; without `sinceHighMs`, so does `stall`). */
-export type ExitState = { entryPriceUsd: number; highUsd: number; rungs: number; heldMs?: number; sinceHighMs?: number };
-/** `atUsd`: the level that fired (a stop, a take-profit or a pullback), absent for a sell at market. */
-export type ExitTrigger = { sellPct: number; rung?: number; reason: string; atUsd?: number };
+/** A held coin as the plan sees it: its entry, the high since the buy, how many take-profits have sold, which trail steps have sold
+ *  (`trailsSold`, one bit each by its place in `trailSteps`), how long it has been held and how long since its high (without `heldMs`, stops
+ *  armed by time stay off; without `sinceHighMs`, so does `stall`). */
+export type ExitState = { entryPriceUsd: number; highUsd: number; rungs: number; trailsSold?: number; heldMs?: number; sinceHighMs?: number };
+const bitSet = (mask: number | undefined, bit: number) => ((mask ?? 0) >> bit & 1) === 1;
 const pct = (n: number) => Math.round(n) + '%';
 
 /** The take-profit at rung `rungs`: the plan's own take-profits first, then the scale-out steps until they have sold the whole bag. */
@@ -76,59 +82,63 @@ export function takeProfitAt(plan: ExitPlan, rungs: number): ExitPlan['takeProfi
   if (!ladder || step * ladder.sellPct >= 100) return undefined;
   return { gainPct: ((1 + ladder.fromPct / 100) * (1 + ladder.stepPct / 100) ** step - 1) * 100, sellPct: ladder.sellPct };
 }
+/** The gain (%) at which the take-profits and scale-out steps have sold the whole bag, or undefined when they never do or a pullback step
+ *  makes the high at that sale unknown. A step can only arm below it. */
+export function soldOutAtPct(plan: ExitPlan) {
+  let sold = 0, high = 0;
+  const rungs = plan.takeProfits.length + 100 / SCALE_OUT_MIN_SELL_PCT;
+  for (let rung = 0, next = takeProfitAt(plan, 0); next && rung < rungs; next = takeProfitAt(plan, ++rung)) {
+    if (next.pullbackPct) return undefined;
+    high = Math.max(high, next.gainPct); sold += next.sellPct;
+    if (sold >= 100) return high;
+  }
+  return undefined;
+}
 /** How many full `lockStepPct` steps the high is above the entry. */
 const stepsUp = (plan: ExitPlan, state: ExitState) => plan.lockStepPct ? Math.floor((state.highUsd / state.entryPriceUsd - 1) * 100 / plan.lockStepPct + 1e-9) : 0;
 
-/** The stop level every active stop-loss implies now; the highest one wins. */
+/** Where a stop sells now and how far under the high or the entry that is, or null while it waits for its gain or its hold time. */
+function stopAt(stop: Stop, state: ExitState) {
+  if (stop.armAtGainPct && state.highUsd < state.entryPriceUsd * (1 + stop.armAtGainPct / 100)) return null;
+  if (stop.afterMinutes && (state.heldMs === undefined || state.heldMs < stop.afterMinutes * 60_000)) return null;
+  // A trail with `widenAtGainPct` runs `widenToPct` under the high once the coin has been up that much.
+  const widened = stop.trailing && stop.widenAtGainPct && stop.widenToPct && state.highUsd >= state.entryPriceUsd * (1 + stop.widenAtGainPct / 100);
+  const distance = widened ? stop.widenToPct! : stop.trailing ? stop.trailDistancePct ?? stop.lossPct : stop.lossPct;
+  return { distance, at: (stop.trailing ? state.highUsd : state.entryPriceUsd) * (1 - distance / 100) };
+}
+
+/** The level every active stop that sells the rest implies now; the highest one wins. */
 export function stopLevel(plan: ExitPlan, state: ExitState) {
   let level = 0, reason = '';
   for (const stop of plan.stopLosses) {
-    if (stop.armAtGainPct && state.highUsd < state.entryPriceUsd * (1 + stop.armAtGainPct / 100)) continue;
-    if (stop.afterMinutes && (state.heldMs === undefined || state.heldMs < stop.afterMinutes * 60_000)) continue;
-    // A trail with `widenAtGainPct` runs `widenToPct` under the high once the coin has been up that much.
-    const widened = stop.trailing && stop.widenAtGainPct && stop.widenToPct && state.highUsd >= state.entryPriceUsd * (1 + stop.widenAtGainPct / 100);
-    const distance = widened ? stop.widenToPct! : stop.trailing ? stop.trailDistancePct ?? stop.lossPct : stop.lossPct;
-    const at = (stop.trailing ? state.highUsd : state.entryPriceUsd) * (1 - distance / 100);
-    if (at > level) { level = at; reason = stop.trailing ? `Trailing stop: ${pct(distance)} below the high`
-      : stop.afterMinutes ? (distance ? `Time stop: ${pct(distance)} below the entry after ${stop.afterMinutes} min` : `Time stop: not up ${stop.afterMinutes} min after the buy`) : `Stop-loss: ${pct(distance)} below the entry`; }
+    const on = isTrailStep(stop) ? null : stopAt(stop, state);
+    if (!on || on.at <= level) continue;
+    level = on.at;
+    reason = stop.trailing ? `Trailing stop: ${pct(on.distance)} below the high`
+      : stop.afterMinutes ? (on.distance ? `Time stop: ${pct(on.distance)} below the entry after ${stop.afterMinutes} min` : `Time stop: not up ${stop.afterMinutes} min after the buy`) : `Stop-loss: ${pct(on.distance)} below the entry`;
   }
   // Each full step climbed locks in the step below it.
   const steps = stepsUp(plan, state), locked = state.entryPriceUsd * (1 + (steps - 1) * (plan.lockStepPct ?? 0) / 100);
   if (steps >= 2 && locked > level) { level = locked; reason = `Step lock: holds +${pct((steps - 1) * plan.lockStepPct!)}`; }
   return { level, reason };
 }
-
-/** What the plan sells at `price`, given the high already includes it. Stops sell the rest; take-profits sell their share of the original bag.
- *  A price through the stop sells the rest first, whatever pullback line sits above the stop. */
-export function exitTrigger(plan: ExitPlan, state: ExitState, price: number): ExitTrigger | null {
-  const stop = stopLevel(plan, state);
-  if (stop.level > 0 && price <= stop.level) return { sellPct: 100, reason: stop.reason, atUsd: stop.level };
-  const next = takeProfitAt(plan, state.rungs);
-  if (next?.pullbackPct) {
-    const pulled = state.highUsd * (1 - next.pullbackPct / 100);
-    if (state.highUsd >= state.entryPriceUsd * (1 + next.gainPct / 100) && price <= pulled && pulled > stop.level) return { sellPct: next.sellPct, rung: state.rungs, reason: `Took profit: ${pct(next.sellPct)} on a ${pct(next.pullbackPct)} pullback after +${pct(next.gainPct)}`, atUsd: pulled };
+/** The trail step the price meets first: the highest level among the armed steps not sold yet, or null. */
+export function trailStepAt(plan: ExitPlan, state: ExitState) {
+  const steps = trailSteps(plan);
+  let next: { step: number; level: number; sellPct: number; reason: string } | null = null;
+  for (let step = 0; step < steps.length; step++) {
+    const stop = steps[step], on = bitSet(state.trailsSold, step) ? null : stopAt(stop, state);
+    if (on && on.at > (next?.level ?? 0)) next = { step, level: on.at, sellPct: stop.sellPct, reason: `Trailing stop: ${pct(stop.sellPct)} at ${pct(on.distance)} below the high after +${pct(stop.armAtGainPct!)}` };
   }
-  const stall = plan.stall;
-  if (stall && state.sinceHighMs !== undefined && state.sinceHighMs >= stall.minutes * 60_000 && state.highUsd >= state.entryPriceUsd * (1 + stall.armAtGainPct / 100)) return { sellPct: 100, reason: `Stalled: no new high for ${stall.minutes} min after +${pct(stall.armAtGainPct)}` };
-  const level = next && state.entryPriceUsd * (1 + next.gainPct / 100);
-  if (next && level && !next.pullbackPct && price >= level) return { sellPct: next.sellPct, rung: state.rungs, reason: state.rungs >= plan.takeProfits.length ? `Scaled out: ${pct(next.sellPct)} at +${pct(next.gainPct)}` : `Took profit: ${pct(next.sellPct)} at +${pct(next.gainPct)}`, atUsd: level };
-  return null;
+  return next;
 }
 
-/** Prices where the plan acts next, so the price feed can watch closer as a coin nears one: the stop below, and above it the nearest of
- *  the next take-profit, the next trailing stop that arms once the coin is up enough and the next step lock. */
-export function exitTargets(plan: ExitPlan, state: ExitState) {
-  const next = takeProfitAt(plan, state.rungs), stop = stopLevel(plan, state).level;
-  const above = [...(next ? [state.entryPriceUsd * (1 + next.gainPct / 100)] : []), ...plan.stopLosses.flatMap(sl => sl.armAtGainPct ? [state.entryPriceUsd * (1 + sl.armAtGainPct / 100)] : []),
-    ...(plan.lockStepPct ? [state.entryPriceUsd * (1 + (Math.max(stepsUp(plan, state), 1) + 1) * plan.lockStepPct / 100)] : [])].filter(price => price > state.highUsd);
-  return { stopUsd: stop > 0 ? stop : null, takeProfitUsd: above.length ? Math.min(...above) : null };
-}
-
-/** The plan's next sells as people see them, read from the same state the evaluator runs on: the stop that sells the rest (and which
- *  one it is) and the next take-profit. Whatever sets the plan or the high, these follow. */
+/** The plan's next sells as people see them, read from the same state the evaluator runs on: the next sell on the way down (the trail step
+ *  that sells its share, or the stop that sells the rest, and which one it is) and the next take-profit. Whatever sets the plan or the
+ *  high, these follow. */
 export function nextSells(plan: ExitPlan, state: ExitState) {
-  const stop = stopLevel(plan, state), next = takeProfitAt(plan, state.rungs);
-  return { stop: stop.level > 0 ? { priceUsd: stop.level, reason: stop.reason } : null,
+  const stop = stopLevel(plan, state), step = trailStepAt(plan, state), next = takeProfitAt(plan, state.rungs);
+  return { stop: step && step.level > stop.level ? { priceUsd: step.level, reason: step.reason } : stop.level > 0 ? { priceUsd: stop.level, reason: stop.reason } : null,
     takeProfit: next ? { priceUsd: state.entryPriceUsd * (1 + next.gainPct / 100), sellPct: next.sellPct, pullbackPct: next.pullbackPct ?? null } : null };
 }
 
@@ -153,20 +163,22 @@ export function describeExits(plan: ExitPlan) {
   const named = namedExitPlan(plan), stop = trailPct(plan);
   if (named) return `${EXIT_PLANS[named].exits.name}: ${EXIT_PLANS[named].summary.charAt(0).toLowerCase()}${EXIT_PLANS[named].summary.slice(1)}${stop ? `; ${describeTrail(stop)}` : ''}`;
   const takeProfits = [...plan.takeProfits].sort((a, b) => a.gainPct - b.gainPct), total = takeProfits.reduce((sum, tp) => sum + tp.sellPct, 0);
+  const distance = (sl: Stop) => sl.trailing ? sl.trailDistancePct ?? sl.lossPct : sl.lossPct;
+  // Only the tightest always-on trail matters, and a later trail no tighter than it never fires.
+  const always = plan.stopLosses.filter(isTrail).sort((a, b) => distance(a) - distance(b))[0], fires = (sl: Stop) => !always || distance(sl) < distance(always);
   const sells = takeProfits.map((tp, i) => {
     const what = share(tp.sellPct, i === takeProfits.length - 1 && i > 0 && total >= 100);
     return tp.pullbackPct ? `${what} on a ${pct(tp.pullbackPct)} pullback after ${gain(tp.gainPct)}` : `${what} at ${gain(tp.gainPct)}`;
   });
+  // A trail step is a pullback sale in all but its order: each sells when the price falls through its own trail.
+  sells.push(...trailSteps(plan).filter(fires).sort((a, b) => a.armAtGainPct! - b.armAtGainPct!).map(sl => `${share(sl.sellPct, false)} on a ${pct(distance(sl))} pullback after ${gain(sl.armAtGainPct!)}`));
   if (plan.scaleOut && total < 100) sells.push(`${pct(plan.scaleOut.sellPct)} at ${gain(plan.scaleOut.fromPct)} and again every +${pct(plan.scaleOut.stepPct)}`);
-  const distance = (sl: ExitPlan['stopLosses'][number]) => sl.trailing ? sl.trailDistancePct ?? sl.lossPct : sl.lossPct;
-  // Only the tightest always-on trail matters, and a later trail no tighter than it never fires.
-  const always = plan.stopLosses.filter(isTrail).sort((a, b) => distance(a) - distance(b))[0];
   const fixed = plan.stopLosses.filter(sl => !sl.trailing && !sl.armAtGainPct && !sl.afterMinutes).map(sl => `stops out ${pct(sl.lossPct)} below the buy`);
   const timed = plan.stopLosses.filter(sl => sl.afterMinutes && !sl.trailing).map(sl => sl.lossPct ? `after ${sl.afterMinutes} min, stops out ${pct(sl.lossPct)} below the buy` : `sells at the buy price if it isn’t up after ${sl.afterMinutes} min`);
-  const tightening = plan.stopLosses.filter(sl => sl.afterMinutes && sl.trailing && !sl.armAtGainPct && (!always || distance(sl) < distance(always))).sort((a, b) => a.afterMinutes! - b.afterMinutes!)
+  const tightening = plan.stopLosses.filter(sl => sl.afterMinutes && sl.trailing && !sl.armAtGainPct && fires(sl)).sort((a, b) => a.afterMinutes! - b.afterMinutes!)
     .map(sl => `trails ${pct(distance(sl))} after ${sl.afterMinutes} min`);
   const locks = [...(plan.lockStepPct ? [`every +${pct(plan.lockStepPct)} it climbs locks in the step below`] : []), ...(plan.stall ? [`once up ${pct(plan.stall.armAtGainPct)}, sells after ${plan.stall.minutes} min without a new high`] : [])];
-  const armed = plan.stopLosses.filter(sl => sl.armAtGainPct && (!always || distance(sl) < distance(always))).sort((a, b) => a.armAtGainPct! - b.armAtGainPct!)
+  const armed = plan.stopLosses.filter(sl => sl.armAtGainPct && !isTrailStep(sl) && fires(sl)).sort((a, b) => a.armAtGainPct! - b.armAtGainPct!)
     .map(sl => `${sl.armAtGainPct! % 100 === 0 ? `after ${gain(sl.armAtGainPct!)}` : `once up ${pct(sl.armAtGainPct!)}`}, trails ${pct(distance(sl))}`);
   const stops = [...(always ? [describeTrail(distance(always))] : []), ...tightening, ...fixed, ...armed, ...locks, ...timed];
   const line = [sells.length ? `sells ${list(sells)}` : '', ...stops].filter(Boolean).join('; ');

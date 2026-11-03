@@ -8,7 +8,8 @@ import { Copy, Crosshair, Flag, LoaderCircle, PenLine, Send, X } from 'lucide-re
 import { toast } from 'sonner';
 import { api } from '@/lib/convex';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ScrollFade } from '@/components/ui/scroll-fade';
 import { Textarea } from '@/components/ui/textarea';
 import { REPORT, REPORT_KINDS, REPORT_KIND_LABEL, type ReportKind, type ReportTarget } from '../../../../types/report';
 import type { Focus } from './CommandPanel';
@@ -125,18 +126,21 @@ function ReportDialog({ draft, data }: { draft: ReportDraft; data: HomeData | nu
     } catch (cause) { failToast(cause); } finally { setBusy(false); }
   };
   return <Dialog open onOpenChange={next => { if (!next) close(); }}>
-    <DialogContent className="sm:max-w-[28rem]" aria-describedby={undefined}>
-      <form className={s.decision} onSubmit={submit}>
-        <div className={s.decisionHead}><span className={s.accountIcon}><Flag size={18}/></span><span className={s.grow}><DialogTitle asChild><b>Report a problem</b></DialogTitle><small>{draft.target ? `About ${draft.target.label}` : draft.element ? 'About what you picked' : 'Anything about HOTBOT'}</small></span></div>
-        {(draft.target || draft.element) && <div className={s.reportAbout}>
-          {draft.target && <span className={s.pill}>{draft.target.type === 'coin' ? 'Coin' : 'Strategy'} · <b>{draft.target.label}</b></span>}
-          {draft.element && <q className={s.reportQuote}>{draft.element}</q>}
-        </div>}
-        <div className={s.inviteField}><span className={s.inviteFieldLabel} id="report-kind">What’s wrong</span>
-          <span className={s.seg} role="group" aria-labelledby="report-kind">{REPORT_KINDS.filter(value => value !== 'error').map(value => <button type="button" key={value} aria-pressed={value === kind} onClick={() => setKind(value)}>{REPORT_KIND_LABEL[value]}</button>)}</span>
-        </div>
-        <Textarea value={comment} maxLength={REPORT.comment} rows={3} autoFocus placeholder={kind === 'idea' ? 'What would make HOTBOT better?' : 'What did you expect to see?'} aria-label="Your note" onChange={event => setComment(event.target.value)}/>
-        <div className={s.accountActions}>
+    <DialogContent className="flex flex-col overflow-hidden p-0 sm:max-w-[28rem]" aria-describedby={undefined}>
+      {/* The body scrolls and the actions stay, so a phone's keyboard never hides Send. */}
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
+        <DialogBody className={`${s.decision} pb-4`}>
+          <div className={s.decisionHead}><span className={s.accountIcon}><Flag size={18}/></span><span className={s.grow}><DialogTitle asChild><b>Report a problem</b></DialogTitle><small>{draft.target ? `About ${draft.target.label}` : draft.element ? 'About what you picked' : 'Anything about HOTBOT'}</small></span></div>
+          {(draft.target || draft.element) && <div className={s.reportAbout}>
+            {draft.target && <span className={s.pill}>{draft.target.type === 'coin' ? 'Coin' : 'Strategy'} · <b>{draft.target.label}</b></span>}
+            {draft.element && <q className={s.reportQuote}>{draft.element}</q>}
+          </div>}
+          <div className={s.inviteField}><span className={s.inviteFieldLabel} id="report-kind">What’s wrong</span>
+            <ScrollFade className={`${s.seg} ${s.segRow}`} role="group" aria-labelledby="report-kind">{REPORT_KINDS.filter(value => value !== 'error').map(value => <button type="button" key={value} aria-pressed={value === kind} onClick={() => setKind(value)}>{REPORT_KIND_LABEL[value]}</button>)}</ScrollFade>
+          </div>
+          <Textarea value={comment} maxLength={REPORT.comment} rows={3} autoFocus placeholder={kind === 'idea' ? 'What would make HOTBOT better?' : 'What did you expect to see?'} aria-label="Your note" onChange={event => setComment(event.target.value)}/>
+        </DialogBody>
+        <div className={`${s.dialogDock} ${s.accountActions}`}>
           {!draft.target && !draft.element ? <Button type="button" variant="outline" disabled={busy} onClick={() => setDraft({ ...draft, kind, comment, stage: 'pick' })}><Crosshair/>Point at it</Button>
             : <DialogClose asChild><Button type="button" variant="secondary" disabled={busy}>Cancel</Button></DialogClose>}
           <Button type="submit" disabled={busy || empty}>{busy ? <LoaderCircle className="animate-spin"/> : <Send/>}Send report</Button>

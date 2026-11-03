@@ -1,6 +1,7 @@
 import { EXIT_PLANS, isTrail, namedExitPlan, trailPct, withTrail, type ExitPlan, type ExitPlanId } from './exits';
 import { STREAMS, streamsOf, type Stream, type TeamRules } from './hotbot';
 import { mustHaves, type StrategyPatch } from './team';
+import { BOTH_SIDES } from './market';
 
 /** Easy settings: a few plain choices over the same rules Advanced edits. Each control reads the option the rules match, or null when only
  *  Advanced could have set the value (the control then shows that value instead of snapping it to a choice), and writes a StrategyPatch. */
@@ -21,14 +22,14 @@ export const MARKETS: Market[] = [
 const capHard = (rules: TeamRules) => mustHaves(rules).includes('marketCap');
 const isBand = (rules: TeamRules, cap: CapBand) => cap.min === rules.minMarketCapUsd && cap.max === rules.maxMarketCapUsd && (!cap.min && !cap.max || capHard(rules));
 export const marketOf = (rules: TeamRules) => { const picked = streamsOf(rules).join(); return MARKETS.find(row => row.streams.join() === picked && isBand(rules, row.cap)) ?? null; };
-/** One-sided pool liquidity at a market cap on the graduated-pool line (AGENTS.md, Liquidity): $15K × √(cap ÷ $100K). */
+/** One-sided pool liquidity at a market cap on the graduated-pool line: $15K × √(cap ÷ $100K). A floor is both sides (BOTH_SIDES). */
 const poolAt = (capUsd: number) => 15_000 * Math.sqrt(capUsd / 100_000);
 /** A band's floors for liquidity and volume: a coin at the band's low end (a quarter of its top when it has no floor) must be able to pass
  *  them, so a floor that only a larger coin meets comes down. Floors only come down. */
 function bandFloors(cap: CapBand, rules: TeamRules): StrategyPatch {
   const low = cap.min || cap.max / 4;
   if (!low) return {};
-  return { minLiquidityUsd: Math.min(rules.minLiquidityUsd, Math.floor(poolAt(low) * 0.9 / 100) * 100), minVolume24hUsd: Math.min(rules.minVolume24hUsd, Math.floor(low / 2)) };
+  return { minLiquidityUsd: Math.min(rules.minLiquidityUsd, Math.floor(poolAt(low) * BOTH_SIDES * 0.9 / 100) * 100), minVolume24hUsd: Math.min(rules.minVolume24hUsd, Math.floor(low / 2)) };
 }
 function capPatch(cap: CapBand, rules: TeamRules): StrategyPatch {
   const must = mustHaves(rules).filter(rule => rule !== 'marketCap');
@@ -45,6 +46,8 @@ export const fixedStop = (exits: ExitPlan) => exits.stopLosses.find(isFixed)?.lo
 /** Each stop has a switch; its picks are the values it takes while on. */
 export const STOPS = [15, 25, 35] as const;
 export const TRAILS = [10, 15, 20, 30] as const;
+/** The plans Easy offers, in Easy's own names and words. Advanced and the rest of the app keep each plan's own name;
+ *  any other plan shows by that name and stays as it is. */
 export const EASY_PLANS: { id: ExitPlanId; name: string; text: string }[] = [
   { id: 'flip', name: 'Sell at 2x', text: 'Sells everything when your coin doubles.' },
   { id: 'ladder', name: '1.5x, 2x, Ride', text: 'Sells a third when you\'re up 50%, a third when it doubles, and lets the rest keep going.' },
@@ -71,3 +74,20 @@ export const TOTALS = [0.5, 1, 2, 5, 10] as const;
 export const COINS = [3, 5, 10] as const;
 export const perCoin = (total: number, coins: number) => Math.max(0.01, Math.floor(total / coins * 100) / 100);
 export const budgetPatch = (total: number, coins: number): StrategyPatch => ({ budgetSol: total, maxOpen: coins, tradeSol: perCoin(total, coins) });
+
+/** What HOTBOT read from a person's words on the Easy screen (`team.easy`): only Easy's own picks, each left out when the words don't say it. */
+export type EasyChoice = { market?: string; plan?: ExitPlanId; stop?: number; trail?: number; budget?: number; coins?: number; askFirst?: boolean };
+/** A choice as the patch Easy's own rows would write, applied in the order the rows sit. */
+export function easyChoicePatch(rules: TeamRules, choice: EasyChoice): StrategyPatch {
+  const market = MARKETS.find(row => row.id === choice.market);
+  let exits = rules.exits;
+  if (choice.plan) exits = exitsWith(exits, { plan: EXIT_PLANS[choice.plan].exits });
+  if (choice.stop !== undefined) exits = exitsWith(exits, { fixed: choice.stop });
+  return {
+    ...(market ? marketPatch(market, rules) : {}),
+    ...(exits !== rules.exits ? { exits } : {}),
+    ...(choice.trail !== undefined ? { stopLossPct: choice.trail } : {}),
+    ...(choice.budget !== undefined || choice.coins !== undefined ? budgetPatch(choice.budget ?? rules.allocationSol, choice.coins ?? rules.maxOpenPositions) : {}),
+    ...(choice.askFirst !== undefined ? { askFirst: choice.askFirst } : {}),
+  };
+}

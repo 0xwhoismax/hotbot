@@ -1,43 +1,108 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, RotateCcw } from 'lucide-react';
-import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, HistogramSeries, LineStyle, type CandlestickData, type HistogramData, type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { fetchOHLCVRange } from '@/services/marketDataService';
-import { price } from './format';
+import { ArrowDown, ArrowUp, ChevronRight, RotateCcw } from 'lucide-react';
+import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, HistogramSeries, LineStyle, TickMarkType, type CandlestickData, type HistogramData, type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
+import { bucketOf, marketCandles, useMarketBars, useMarketOpenedAt, useMarketPrice } from '@/services/market';
+import { price, signedSol, sol, tone } from './format';
 import { Loading } from './Parts';
+import { entryReason, plainReason, type Item } from './Decision';
+import { devCandles } from './devCandles';
+import { chartPeriodAtom } from './state';
+import type { StreamEvent } from './Stream';
+import { tokenDetailsLaunchedAt, type useTokenDetails } from './TokenInfo';
 import { BotAvatar } from '@/components/hotbot/BotAvatar';
 import type { AgentRole } from '../../../../types/hotbot';
 import type { FeedbackMark } from '../../../../types/feedback';
+import { MARKET_CANDLES, MARKET_PERIODS, chainBars, foldBar, type CandlesAnswer, type MarketBar, type MarketPeriod } from '../../../../types/marketFeed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { usePriceDisplay } from '@/hooks/usePriceDisplay';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { formatTokenPrice } from '@/lib/chartUnits';
-import type { OHLCVData } from '@/types/dataApiTypes';
 import s from './team.module.css';
 
-const PERIODS = [['1s', 1_000], ['5s', 5_000], ['15s', 15_000], ['1m', 60_000], ['5m', 300_000], ['15m', 900_000], ['1h', 3_600_000], ['4h', 14_400_000]] as const;
-type Period = typeof PERIODS[number][0];
+const PERIODS = ['1s', '5s', '15s', '1m', '5m', '15m', '1h', '4h'] as const satisfies readonly MarketPeriod[];
+type Period = typeof PERIODS[number];
 const PERIOD_NAME: Record<Period, string> = { '1s': 'second', '5s': '5 seconds', '15s': '15 seconds', '1m': 'minute', '5m': '5 minutes', '15m': '15 minutes', '1h': 'hour', '4h': '4 hours' };
-// Auto sizes candles to the coin's age: 1-minute for its first few hours, 5-minute through its first day, 15-minute after (and when the age is unknown).
-const autoPeriod = (ageMinutes: number | null): Period => ageMinutes == null ? '15m' : ageMinutes < 180 ? '1m' : ageMinutes < 1440 ? '5m' : '15m';
-// One cached history per coin and period: every candle loaded so far, and `from`, the earliest time already asked for.
+/** Auto sizes candles to the coin's age: each size while the coin is younger than its hours, the last one after (and when the age is unknown). */
+const AUTO: [hours: number, size: Period][] = [[3, '1m'], [24, '5m'], [Infinity, '15m']];
+const autoPeriod = (ageMinutes: number | null) => AUTO.find(([hours]) => ageMinutes != null && ageMinutes < hours * 60)?.[1] ?? AUTO[AUTO.length - 1][1];
+const AUTO_TITLE = 'Sized to the coin’s age: ' + AUTO.map(([hours, size]) => hours === Infinity ? `${size} after` : `${size} under ${hours}h`).join(', ');
+// One cached history per coin and period: `rows`, the candles the reads returned; `from`, where they start in full; `readAt`, when the
+// latest read began (this clock); `through`, the newest 1-second bar the reads held; `live`, the socket's 1-second bars after it, oldest
+// first; and `first`, the start of the coin's earliest candle that the gateway holds, once a read named it.
 // Second candles exist only for seconds that traded, so their first load and older pages go by candle count (the latest before a time) instead of a time window.
-type History = { rows: OHLCVData[]; from: number };
-const LATEST = 240, OLDER = 480, EDGE = 20;
-// The latest candles at a readable width (at least 30, all of them when they fit), with the price fitted to what is on screen.
+type History = { rows: MarketBar[]; from: number; readAt: number; through?: number; live: MarketBar[]; first?: number };
+/** LIVE: the socket bars `live` holds before its finished periods fold into `rows`. */
+const LATEST = 240, OLDER = 480, EDGE = 20, LIVE = 1_800;
+/** How many candles one frame shows at a readable width: at least 30. */
+const roomOf = (api: IChartApi) => Math.max(30, Math.floor(api.timeScale().width() / 10));
+// The latest candles at a readable width (all of them when they fit), with the price fitted to what is on screen.
 function frame(api: IChartApi, count: number) {
-  const scale = api.timeScale(), room = Math.max(30, Math.floor(scale.width() / 10));
+  const scale = api.timeScale(), room = roomOf(api);
   if (count > room) scale.setVisibleLogicalRange({ from: count - room, to: count + 3 });
   else scale.fitContent();
   api.priceScale('right').applyOptions({ autoScale: true });
 }
-export const rangeCandles = (address: string, period: string, from: number, to: number) => ({
+/** A fixed window of one coin's candles (the Lab's replay) in whole candles: fetched once, never live or paged, shared by the chart and whoever replays them. */
+export const rangeCandles = (address: string, period: MarketPeriod, from: number, to: number) => ({
   queryKey: ['coin-chart-range', address, period, from, to],
-  queryFn: async (): Promise<History> => ({ rows: (await fetchOHLCVRange(address, period, from, to, 'solana')).filter(row => row.close > 0), from }),
+  queryFn: async ({ signal }: { signal: AbortSignal }): Promise<History> => {
+    const step = MARKET_PERIODS[period];
+    return { ...await marketCandles(address, period, bucketOf(from, step), Math.ceil(to / step) * step, undefined, signal), readAt: Date.now(), live: [] };
+  },
   staleTime: Infinity, retry: 2, retryDelay: 1500,
 });
-const mergeRows = (base: OHLCVData[], next: OHLCVData[]) => [...new Map([...base, ...next].map(row => [row.timestamp, row])).values()].sort((a, b) => a.timestamp - b.timestamp);
+/** `next` over `base` by candle start. */
+const mergeRows = (base: MarketBar[], next: MarketBar[]) => [...new Map([...base, ...next].map(row => [row.t, row])).values()].sort((a, b) => a.t - b.t);
+/** `bars` folded onto `rows` in one copy: each folds into the last candle, or opens its period's candle at the last one's close (`chainBars`). */
+function foldOn(rows: MarketBar[], bars: MarketBar[], step: number) {
+  const out = rows.slice();
+  for (const bar of bars) {
+    const t = bucketOf(bar.t, step), last = out.at(-1);
+    if (!last || t > last.t) out.push(...chainBars([t === bar.t ? bar : { ...bar, t }], last?.c));
+    else if (t === last.t) out[out.length - 1] = foldBar(last, bar);
+  }
+  return out;
+}
+/** `live` and the bars of `bars` after both `through` and its own last bar. */
+function after(live: MarketBar[], bars: MarketBar[], through?: number) {
+  let last = Math.max(through ?? -Infinity, live.at(-1)?.t ?? -Infinity);
+  const added: MarketBar[] = [];
+  for (const bar of bars) if (bar.t > last) { added.push(bar); last = bar.t; }
+  return added.length ? [...live, ...added] : live;
+}
+/** A read merged over what is held. The read with the newer `through` wins candles of the same start, and `live` keeps its bars after the
+ *  newest `through` (on the first read, the bars that came before it). */
+function land(held: History | undefined, answer: CandlesAnswer, readAt: number, early: MarketBar[]): History {
+  const mine = held?.through ?? -Infinity, newest = Math.max(mine, answer.through ?? -Infinity), through = Number.isFinite(newest) ? newest : undefined;
+  const rows = !held ? answer.rows : (answer.through ?? -Infinity) >= mine ? mergeRows(held.rows, answer.rows) : mergeRows(answer.rows, held.rows);
+  return { rows, from: Math.min(held?.from ?? answer.from, answer.from), readAt, through, live: after([], held?.live ?? early, through), first: answer.first ?? held?.first };
+}
+/** The socket's bars joined to `live`. Past LIVE bars, its finished periods fold into `rows` and raise `through`. */
+function take(held: History, bars: MarketBar[], step: number): History {
+  const live = after(held.live, bars, held.through);
+  if (live === held.live) return held;
+  const open = bucketOf(live[live.length - 1].t, step), done = live.length > LIVE ? live.findIndex(bar => bar.t >= open) : 0;
+  return done > 0 ? { ...held, rows: foldOn(held.rows, live.slice(0, done), step), through: live[done - 1].t, live: live.slice(done) } : { ...held, live };
+}
+type Bar = CandlestickData<UTCTimestamp> & { volume: number };
+/** The index of the candle holding `seconds` (the last candle for a time after it), or null before the first. */
+function candleIndex(bars: Bar[], seconds: number) {
+  if (!bars.length || seconds < bars[0].time) return null;
+  let lo = 0, hi = bars.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars[mid].time <= seconds) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+const same = (a: Bar, b: Bar) => a === b || (a.time === b.time && a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close && a.volume === b.volume);
+// One drawn bar per candle row, so an unchanged candle keeps its object from one draw to the next.
+const drawn = new WeakMap<MarketBar, Bar>();
+function toBar(row: MarketBar) {
+  let bar = drawn.get(row);
+  if (!bar) drawn.set(row, bar = { time: Math.floor(row.t / 1000) as UTCTimestamp, open: row.o, high: row.h, low: row.l, close: row.c, volume: row.v });
+  return bar;
+}
 
 // Theme tokens are oklch; the canvas chart needs plain rgba, so paint each one onto a 1px canvas and read it back.
 let probe: CanvasRenderingContext2D | null = null;
@@ -63,104 +128,162 @@ export function themeOptions(el: Element) {
 }
 // Second candles read to the second; minute and longer ones to the minute.
 const localTime = (time: Time, seconds: boolean, withDate = false) => new Date((time as number) * 1000).toLocaleString('en-US', { ...(withDate && { month: 'short', day: 'numeric' }), hour: 'numeric', minute: '2-digit', ...(seconds && { second: '2-digit' }) });
+/** An axis label: a tick that starts a day, month or year names its date; a tick within a day names its time. */
+const tickLabel = (time: Time, type: TickMarkType, seconds: boolean) => type <= TickMarkType.DayOfMonth ? new Date((time as number) * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : localTime(time, seconds);
 
 /** One bot decision at the time and price it happened, a pin with its bot as the Lab's sales; each sale is also a dashed line at its price.
- *  `trade` numbers the coin's picks when there is more than one. */
-export type ChartMarker = { id: string; t: number; priceUsd: number; kind: 'pick' | 'buy' | 'sell'; role: AgentRole; title: string; value?: string; tone?: 'up' | 'down'; sub?: string | null; trade?: number; itemId: string | null };
-/** A fixed window instead of the live chart (ms): `view` is the stretch framed on load and on Reset view. */
-export type ChartRange = { from: number; to: number; view?: { from: number; to: number } };
+ *  `entry` is SniperBot's entry decision, `buy` TraderBot's fill. `trade` numbers the coin's picks when there is more than one. */
+export type ChartMarker = { id: string; t: number; priceUsd: number; kind: 'pick' | 'entry' | 'buy' | 'sell'; role: AgentRole; title: string; value?: string; tone?: 'up' | 'down'; sub?: string | null; trade?: number; itemId: string | null };
+/** A coin's trail (`api.team.trail`) as pins: every pick, entry, buy and sale with a price; picks are numbered as trades once the strategy
+ *  picked the coin more than once. An entry at market stores no price: it was set at its pick's price in the same moment, or (back from the
+ *  queue) at the armed price of `item`, the coin on screen. */
+export function trailMarkers(trail: StreamEvent[] | undefined, item: Item | null | undefined): ChartMarker[] {
+  const events = trail ?? [], picks = [...new Set([...events].reverse().map(event => event.itemId))];
+  const picked = new Map(events.filter(event => event.kind === 'passed').map(event => [event.itemId, event]));
+  return events.flatMap((event): ChartMarker[] => {
+    const pick = event.kind === 'armed' ? picked.get(event.itemId) : undefined;
+    const priceUsd = event.priceUsd ?? (pick && Math.abs(pick.at - event.at) < 5_000 ? pick.priceUsd : event.kind === 'armed' && event.itemId === item?.id ? item.armedPriceUsd : null);
+    if (!priceUsd || !['passed', 'armed', 'bought', 'sold'].includes(event.kind)) return [];
+    return [{
+      id: event.id, t: event.at, priceUsd, itemId: event.itemId, role: event.kind === 'passed' ? 'research' : event.kind === 'armed' || event.actor === 'sniper' ? 'sniper' : 'trader',
+      trade: picks.length > 1 && event.itemId ? picks.indexOf(event.itemId) + 1 : undefined,
+      ...(event.kind === 'passed' ? { kind: 'pick' as const, title: 'Picked', value: event.count ? `score ${event.count}` : undefined, sub: plainReason(event.detail).replace(/ · score \d+$/, '') || null }
+        : event.kind === 'armed' ? { kind: 'entry' as const, title: 'Entry set', value: event.amountSol != null ? sol(event.amountSol) : undefined, sub: entryReason(event.detail) }
+        : event.kind === 'bought' ? { kind: 'buy' as const, title: 'Bought', value: sol(event.amountSol) }
+        : { kind: 'sell' as const, title: 'Sold', value: signedSol(event.pnlSol), tone: tone(event.pnlSol), sub: event.detail }),
+    }];
+  });
+}
+/** A live chart's `launchedAt` from the coin's details read (`useTokenDetails`): undefined during its first attempt, so Auto waits for the
+ *  coin's real age instead of fetching twice; a failing read falls back at once. */
+export const chartLaunchedAt = (details: ReturnType<typeof useTokenDetails>) => details.isPending && details.failureCount === 0 ? undefined : tokenDetailsLaunchedAt(details.data);
+/** A fixed window instead of the live chart (ms): `view` is the stretch framed on load and on Reset view; `period` is the candle Auto
+ *  draws, 1-minute when unset. */
+export type ChartRange = { from: number; to: number; view?: { from: number; to: number }; period?: Period };
 /** The person's own rating on the chart (Rating.tsx): in a mark mode a click or tap on a candle marks its close; their marks draw as arrows.
  *  `prompt` floats over the chart while marking, with Cancel (`onCancel`), so the page around it never moves. */
-export type ChartRating = { mode: 'buy' | 'sell' | null; buy: FeedbackMark | null; sell: FeedbackMark | null; onMark: (kind: 'buy' | 'sell', mark: FeedbackMark) => void; prompt?: string; onCancel?: () => void };
-/** Pins in px, as the Lab's (`PIN` in LabPage): a head's top sits `rise` from its dot and its centre `head`. Only decisions on one spot
- *  (within `near` of a pin's first one) share a pin; a head within `width` and `height` of an earlier one moves up or down a `step` at a time. */
+export type ChartRating = { mode: 'buy' | 'sell' | null; buy: FeedbackMark | null; sell: FeedbackMark | null; onMark: (kind: 'buy' | 'sell', mark: FeedbackMark) => void; 
+  /** A pin in the mark's colour follows the pointer, snapped to the close it would mark. */ ghost?: boolean;
+  /** Someone else's rating (the admin's Coin ratings): the marks read Buy and Sell, not Your buy and Your sell. */ theirs?: boolean };
+/** Pins in px, as the Lab's (`PIN` in LabPage): a head's top sits `rise` from its dot and its centre `head`. Only one bot's decisions on one
+ *  spot (within `near` of its pin's first one) share a pin, so each bot keeps its own head; a head within `width` and `height` of an earlier one
+ *  moves up or down a `step` at a time. */
 const PIN = { stem: 16, rise: 42, head: 25, near: 14, width: 32, height: 30, step: 30 };
-/** A pin's head is its sale (the latest), else its buy, else its pick; its ring is that decision's result. */
-const RANK = { pick: 0, buy: 1, sell: 2 }, RING = { up: 'var(--positive)', down: 'var(--destructive)', flat: 'var(--foreground)' };
+/** A pin's head is its sale (the latest), else its buy, else its entry, else its pick; its ring is that decision's result. */
+const RANK = { pick: 0, entry: 1, buy: 2, sell: 3 }, RING = { up: 'var(--positive)', down: 'var(--destructive)', flat: 'var(--foreground)' };
 const headOf = (members: ChartMarker[]) => members.reduce((best, m) => RANK[m.kind] >= RANK[best.kind] ? m : best);
 /** A pin as laid out: its first decision's id, every id in it in time order and their x range. */
 type Lead = { id: string; ids: string[]; from: number; to: number };
 /** Price over time from our own market data: candles, volume, the entry price, the latest mark and every bot decision.
  *  `launchedAt` is undefined while the coin's age is still loading (no fetch yet) and null when market data has none. */
 export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launchedAt, markers = [], focus, onOpenMarker, rating, range }: { address: string; supply: number | null; entryPriceUsd?: number | null; markPriceUsd?: number | null; launchedAt: number | null | undefined; markers?: ChartMarker[]; focus?: string | null; onOpenMarker?: (marker: ChartMarker) => void; rating?: ChartRating; range?: ChartRange }) {
-  const { unit, label, format } = usePriceDisplay();
-  const [choice, setChoice] = useState<'auto' | Period>('auto');
+  // Without the coin's supply a market cap cannot be drawn, so the chart reads prices instead of a blank scale.
+  const { unit: chosen } = usePriceDisplay(), unit = chosen === 'marketCap' && !supply ? 'price' : chosen;
+  const label = unit === 'marketCap' ? 'Market cap' : 'Price', format = (value: number, supplied: number | null) => formatTokenPrice(value, unit, supplied);
+  // Live charts share the size picked on this device from coin to coin; a fixed window keeps its own, starting on Auto.
+  const [stored, store] = useAtom(chartPeriodAtom), [own, setOwn] = useState<'auto' | Period>('auto');
+  const choice = range ? own : PERIODS.includes(stored as Period) ? stored as Period : 'auto', setChoice = range ? setOwn : store;
   const [touching, setTouching] = useState(false), [hovering, setHovering] = useState(false), mobile = useIsMobile();
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (wheelTimer.current) clearTimeout(wheelTimer.current); }, []);
-  // A fixed window reads minute candles unless the person picks another size.
-  const period = choice === 'auto' ? range ? '1m' : autoPeriod(launchedAt ? (Date.now() - launchedAt) / 60_000 : null) : choice;
+  // Auto: a fixed window's own candle size, else minute candles; a live chart's sized to the coin's age.
+  const auto = range ? range.period ?? '1m' : autoPeriod(launchedAt ? (Date.now() - launchedAt) / 60_000 : null), period = choice === 'auto' ? auto : choice;
   // What is on screen as logical candle positions and the candle count they were measured against, tagged with the coin and period it was framed for.
   // Counted from the newest candle, so candles added in front never leave a stale position behind.
   const [view, setView] = useState<{ key: string; from: number; to: number; count: number } | null>(null);
   // The person moved the price off its automatic fit; zooming or Reset view brings it back.
   const [free, setFree] = useState(false);
   const viewKey = `${address}:${period}:${range ? [range.from, range.to, range.view?.from, range.view?.to].join(':') : ''}`;
-  const step = PERIODS.find(row => row[0] === period)![1], seconds = step < 60_000;
+  const step = MARKET_PERIODS[period], seconds = step < MARKET_PERIODS['1m'];
   const client = useQueryClient();
   const key = ['coin-chart', address, period, launchedAt ?? 0];
   const candles = useQuery(range ? { ...rangeCandles(address, period, range.from, range.to), placeholderData: (previous: History | undefined) => previous } : {
     queryKey: key,
-    // The first fetch loads the latest window (never further back than launch; second candles: the latest 240 by count); every 3-second poll after it asks only from the newest candle on (the live one and anything after a pause) and folds it into what is loaded, so older pages stay.
-    queryFn: async (): Promise<History> => {
-      const newest = client.getQueryData<History>(key)?.rows.at(-1)?.timestamp;
-      const to = Date.now(), from = newest ?? Math.max(to - step * LATEST, launchedAt ? launchedAt - step : -Infinity);
-      const counted = seconds && newest == null;
-      const rows = (await fetchOHLCVRange(address, period, from, to, 'solana', counted ? LATEST : undefined)).filter(row => row.close > 0);
-      const held = client.getQueryData<History>(key), start = counted && rows.length ? rows[0].timestamp : from;
-      return { rows: mergeRows(held?.rows ?? [], rows), from: Math.min(held?.from ?? start, start) };
+    // The first read loads the latest window (never further back than launch; second candles: the latest 240 by count). Each read after it
+    // (on mount, or once the socket opened after the last one) asks only from the newest candle on and merges that over what is loaded, so older pages stay.
+    // Every read ends at the current period's end, so browsers on this coin and period share one answer.
+    queryFn: async ({ signal }): Promise<History> => {
+      const newest = client.getQueryData<History>(key)?.rows.at(-1)?.t, readAt = Date.now(), counted = seconds && newest == null;
+      const floor = launchedAt ? bucketOf(launchedAt - step, step) : null;
+      const from = newest ?? (counted ? floor ?? 0 : Math.max(bucketOf(readAt - step * LATEST, step), floor ?? -Infinity));
+      const answer = await marketCandles(address, period, from, bucketOf(readAt, step) + step, counted ? LATEST : undefined, signal);
+      const held = client.getQueryData<History>(key), buffered = early.current.mint === address ? early.current.bars : [];
+      if (!held) early.current = { mint: address, bars: [] };
+      return land(held, answer, readAt, buffered);
     },
     enabled: launchedAt !== undefined,
-    refetchInterval: 3_000, staleTime: 2_000, retry: 2, retryDelay: 1500, placeholderData: previous => previous,
+    staleTime: 0, retry: 2, retryDelay: 1500, placeholderData: previous => previous,
   });
-  // The team's mark and the candles arrive on their own clocks: whichever came last sets the live candle, so a mark that stopped moving (a sold coin) never holds it back.
+  // The live chart keeps each second the socket sends after its reads' `through` (until the first read lands, in `early`), and reads again
+  // from the newest candle once the socket (re)opens after its last read.
+  const live = range ? null : address, tick = useMarketPrice(live), opened = useMarketOpenedAt(), early = useRef({ mint: address, bars: [] as MarketBar[] });
+  useMarketBars(live, incoming => {
+    if (client.getQueryData<History>(key)) return void client.setQueryData<History>(key, held => held && take(held, incoming, step));
+    if (early.current.mint !== address) early.current = { mint: address, bars: [] };
+    early.current.bars = after(early.current.bars, incoming).slice(-LIVE);
+  });
+  const behind = !range && candles.data != null && !candles.isPlaceholderData && candles.data.readAt < opened, { refetch } = candles;
+  useEffect(() => { if (behind) void refetch({ cancelRefetch: false }); }, [behind, refetch]);
+  // Without a tick, the team's mark and the candles arrive on their own clocks: whichever came last sets the live candle, so a mark that stopped moving (a sold coin) never holds it back.
   const [mark, setMark] = useState({ price: markPriceUsd, at: 0 });
   if (mark.price !== markPriceUsd) setMark({ price: markPriceUsd, at: Date.now() });
   const liveMark = mark.price && mark.at > candles.dataUpdatedAt ? mark.price : null;
-  // Bars in ascending, unique seconds; a newer mark moves the last candle so the chart never lags the header.
+  // Development: a coin the local gateway holds no candles for draws made-up ones up to the latest read, through its pins and latest mark (`devCandles`).
+  const placeholder = process.env.NODE_ENV === 'development' && candles.data != null && !candles.data.rows.length && !candles.data.live.length;
+  const anchorKey = placeholder ? JSON.stringify([markers.map(m => [m.t, m.priceUsd]), markPriceUsd]) : '';
+  const folded = useMemo(() => {
+    if (!candles.data) return [];
+    if (!placeholder) return foldOn(candles.data.rows, candles.data.live, step).map(toBar);
+    const to = range?.to ?? candles.data.readAt, anchors = [...markers.map(m => ({ t: m.t, p: m.priceUsd })), ...(markPriceUsd ? [{ t: to, p: markPriceUsd }] : [])];
+    const from = range?.from ?? Math.max(to - step * MARKET_CANDLES, Math.min(to - step * LATEST, ...anchors.map(a => a.t - step * EDGE)));
+    return devCandles(address, step, from, to, anchors).map(toBar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles.data, step, placeholder, anchorKey]);
+  // The newest tick moves the last candle, so the chart never lags the header; a tick past the last candle's period opens the next one from its close.
   const bars = useMemo(() => {
-    const byTime = new Map<number, CandlestickData<UTCTimestamp> & { volume: number }>();
-    for (const row of candles.data?.rows ?? []) {
-      const t = Math.floor((row.timestamp < 1e12 ? row.timestamp : row.timestamp / 1000)) as UTCTimestamp;
-      byTime.set(t, { time: t, open: row.open, high: row.high, low: row.low, close: row.close, volume: row.volume });
-    }
-    const rows = [...byTime.values()].sort((a, b) => a.time - b.time);
-    const last = rows[rows.length - 1];
-    if (last && liveMark) rows[rows.length - 1] = { ...last, close: liveMark, high: Math.max(last.high, liveMark), low: Math.min(last.low, liveMark) };
-    return rows;
-  }, [candles.data, liveMark]);
-  // Scrolling near the oldest candle loads the page before it, until launch. Pages never change, so they are fetched once and never polled.
+    const last = folded.at(-1);
+    if (!last) return folded;
+    if (tick && tick.t >= last.time * 1000 + step) return [...folded, { time: Math.floor(bucketOf(tick.t, step) / 1000) as UTCTimestamp, open: last.close, high: Math.max(last.close, tick.p), low: Math.min(last.close, tick.p), close: tick.p, volume: 0 }];
+    const price = tick && tick.t >= last.time * 1000 ? tick.p : liveMark;
+    return price ? [...folded.slice(0, -1), { ...last, close: price, high: Math.max(last.high, price), low: Math.min(last.low, price) }] : folded;
+  }, [folded, tick, liveMark, step]);
+  // Scrolling near the oldest candle loads the page before it, until the coin's first candle (else launch, while no read named it). Pages
+  // never change, so they are fetched once and never polled.
   const cursor = candles.data?.from;
   const shown = view?.key === viewKey && bars.length ? { from: bars.length - (view.count - view.from), to: bars.length - (view.count - view.to) } : null;
-  // Away: the newest candle is off screen, or empty space past it takes over a third of the view.
-  const firstVisible = shown?.from ?? null, away = shown != null && (shown.from > bars.length - 1 || shown.to < bars.length - 1 || shown.to - (bars.length - 1) > (shown.to - shown.from) / 3);
+  const firstVisible = shown?.from ?? null;
   const older = useQuery({
     queryKey: ['coin-chart-older', address, period, launchedAt ?? 0, cursor],
-    queryFn: async () => {
-      const to = seconds ? cursor! - 1 : cursor!, from = Math.max(to - step * OLDER, launchedAt ? launchedAt - step : -Infinity);
-      const rows = (await fetchOHLCVRange(address, period, from, to, 'solana', seconds ? OLDER : undefined)).filter(row => row.close > 0);
-      // A page by count reaches back to its oldest candle; an empty one is the start of the coin's history.
-      const start = !seconds ? from : rows.length ? rows[0].timestamp : launchedAt ? launchedAt - step : from;
-      // With a launch time, an empty page is a quiet stretch to move past (or, by count, launch reached); without one, it is the start of the coin's history.
-      if (rows.length || launchedAt) client.setQueryData<History>(key, held => held && { rows: mergeRows(rows, held.rows), from: Math.min(held.from, start) });
-      return rows.length;
+    queryFn: async ({ signal }) => {
+      // Pages end on a candle's start, so a finished page reads the same each time.
+      const to = cursor!, floor = client.getQueryData<History>(key)?.first ?? (launchedAt ? bucketOf(launchedAt - step, step) : null);
+      const from = seconds ? floor ?? 0 : Math.max(to - step * OLDER, floor ?? -Infinity);
+      const answer = await marketCandles(address, period, from, to, seconds ? OLDER : undefined, signal);
+      // With the coin's first candle or a launch time, an empty page is a quiet stretch to move past (or, by count, the start reached);
+      // without either, it is the start of the coin's history.
+      if (answer.rows.length || answer.first != null || launchedAt) client.setQueryData<History>(key, held => held && { ...held, rows: mergeRows(answer.rows, held.rows), from: Math.min(held.from, answer.from), first: answer.first ?? held.first });
+      return answer.rows.length;
     },
-    enabled: !range && cursor != null && !candles.isPlaceholderData && firstVisible != null && firstVisible < EDGE && (!launchedAt || cursor > launchedAt),
+    enabled: !range && !placeholder && cursor != null && !candles.isPlaceholderData && firstVisible != null && firstVisible < EDGE && cursor > (candles.data?.first ?? launchedAt ?? -Infinity),
     staleTime: Infinity, retry: 2, retryDelay: 1500,
   });
 
   const box = useRef<HTMLDivElement>(null);
   const chart = useRef<{ api: IChartApi; candles: ISeriesApi<'Candlestick'>; volume: ISeriesApi<'Histogram'>; entry: IPriceLine | null; exits: IPriceLine[]; marks: ISeriesMarkersPluginApi<Time>; colors: ReturnType<typeof themeOptions> } | null>(null);
+  // Away: the newest candle is off screen, or empty space past it takes over a third of the view. A history short enough to fit in one frame,
+  // with every candle on screen, is the frame itself: the chart caps a candle's width, so its empty space is the fit, not a move away.
+  const last = bars.length - 1, whole = shown != null && chart.current != null && bars.length <= roomOf(chart.current.api) && shown.from <= 0 && shown.to >= last;
+  const away = shown != null && !whole && (shown.from > last || shown.to < last || shown.to - last > (shown.to - shown.from) / 3);
   const sales = markers.filter(marker => marker.kind === 'sell');
   // The chart's click handler is registered once; it reads the current rating here.
-  const rated = useRef(rating);
+  const rated = useRef(rating), ghost = useRef<HTMLSpanElement>(null), controls = useRef<HTMLDivElement>(null);
   useEffect(() => { rated.current = rating; });
   // The pins are DOM over the canvas: `place` moves them to their time and price each time the chart paints, reading the latest bars and markers from `placing`.
   const clouds = useRef(new Map<string, HTMLDivElement>());
   // Decisions too close to tell apart share the earliest one's pin: its id → every id in it, in time order. Only changes on a zoom or a new decision.
   const [groups, setGroups] = useState<Record<string, string[]>>({});
   const groupsKey = useRef('{}');
-  const placing = useRef({ bars: [] as { time: number }[], markers: [] as ChartMarker[], step: 60 });
+  const placing = useRef({ bars: [] as Bar[], markers: [] as ChartMarker[], step: 60 });
   const place = useRef(() => {});
   // What lights a pin, read by `light`: the pointer's x on the chart, the pin whose card is open, the activity row under the pointer (`focus`), and the pins as last laid out.
   const lit = useRef({ x: null as number | null, open: null as string | null, focus: null as string | null, leads: [] as Lead[] });
@@ -174,12 +297,15 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
       if (id === card) node.dataset.open = ''; else delete node.dataset.open;
     }
   });
-  // A card opens by pointing (a mouse), by the first tap (a finger; the second opens the decision, `openAtTap`) or by focus (the keyboard).
-  const show = (id: string) => { lit.current.open = id; light.current(); }, openAtTap = useRef(false);
+  // A card opens by pointing (a mouse), by the first tap (a finger; the second opens the decision) or by focus (the keyboard). The finger is
+  // read on pointerdown, because iOS Safari reports a tap's click as a mouse's.
+  const show = (id: string) => { lit.current.open = id; light.current(); }, tap = useRef<{ touch: boolean; wasOpen: boolean } | null>(null);
   const hide = (id: string) => { if (lit.current.open === id) { lit.current.open = null; light.current(); } };
   const [theme, setTheme] = useState(0);
   // The coin and period the chart was last framed for.
   const fitted = useRef('');
+  // What the series holds: when only the newest candles changed (a tick, a folded second), they alone are updated; anything else redraws all.
+  const painted = useRef<{ bars: Bar[]; theme: number }>({ bars: [], theme: 0 });
   // A fixed window frames its `view`; the live chart its latest candles.
   const fit = (api: IChartApi) => {
     if (!range?.view) return frame(api, bars.length);
@@ -190,14 +316,19 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
   // The chart is an external canvas: create it once, keep it in sync with the app theme, dispose on unmount.
   useEffect(() => {
     const el = box.current!;
+    // A new chart holds nothing (React builds it again in development), so the next paint sets every candle and frames them.
+    painted.current = { bars: [], theme: 0 };
+    fitted.current = '';
     const colors = themeOptions(el);
     const api = createChart(el, {
       autoSize: true, ...colors.chart,
       crosshair: { ...colors.chart.crosshair, mode: CrosshairMode.Normal },
       rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.12, bottom: 0.22 } },
-      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 4, tickMarkFormatter: (time: Time) => localTime(time, false) },
+      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 4, tickMarkFormatter: (time: Time, type: TickMarkType) => tickLabel(time, type, false) },
       localization: { priceFormatter: price, timeFormatter: (time: Time) => localTime(time, false, true) },
       handleScale: { axisDoubleClickReset: false },
+      // A finger moving up or down scrolls the page; a finger moving sideways, a mouse or a pen moves the chart.
+      handleScroll: { vertTouchDrag: false },
     });
     const series = api.addSeries(CandlestickSeries, { upColor: colors.up, downColor: colors.down, wickUpColor: colors.up, wickDownColor: colors.down, borderVisible: false, priceFormat: { type: 'custom', formatter: price, minMove: 1e-12 } });
     const volume = api.addSeries(HistogramSeries, { priceScaleId: '', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
@@ -210,46 +341,51 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
       if (r?.mode && bar) r.onMark(r.mode, { t: ((param.time as number) + placing.current.step) * 1000, priceUsd: bar.close });
     });
     api.subscribeCrosshairMove(param => {
+      const pin = ghost.current, r = rated.current, bar = param.time === undefined ? undefined : param.seriesData.get(series) as CandlestickData<UTCTimestamp> | undefined;
+      if (pin) {
+        const px = bar ? api.timeScale().timeToCoordinate(param.time as UTCTimestamp) : null, py = bar ? series.priceToCoordinate(bar.close) : null;
+        if (r?.ghost && r.mode && px != null && py != null) { pin.style.display = 'grid'; pin.style.transform = `translate(${px + el.offsetLeft}px, ${py + el.offsetTop}px)`; } else pin.style.display = 'none';
+      }
       const x = param.point?.x ?? null;
       if (x !== lit.current.x) { lit.current.x = x; light.current(); }
     });
     place.current = () => {
-      const { bars, markers, step } = placing.current, scale = api.timeScale(), width = scale.width(), height = el.clientHeight - scale.height();
-      // A decision inside a candle sits at its fraction of that candle's span; one after the last candle sits on it.
-      const at = (t: number) => {
-        let lo = 0, hi = bars.length - 1;
-        if (hi < 0 || t < bars[0].time) return null;
-        while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars[mid].time <= t) lo = mid; else hi = mid - 1; }
-        return lo - 0.5 + Math.min(1, (t - bars[lo].time) / step);
-      };
-      type At = { id: string; x: number; y: number };
+      const { bars, markers } = placing.current, scale = api.timeScale(), width = scale.width(), height = el.clientHeight - scale.height();
+      // The pins' layer covers the chart's frame; the drawing sits inside it at its own offset.
+      const left = el.offsetLeft, top = el.offsetTop;
+      type At = { id: string; role: AgentRole; x: number; y: number };
       const points: At[] = [];
       for (const marker of [...markers].sort((a, b) => a.t - b.t)) {
         const node = clouds.current.get(marker.id);
         if (!node) continue;
-        // The chart maps only whole candle positions to pixels, so a fraction is read between the two candles around it.
-        const logical = at(marker.t / 1000), whole = logical == null ? null : Math.floor(logical);
-        const left = whole == null ? null : scale.logicalToCoordinate(whole as never), right = whole == null ? null : scale.logicalToCoordinate(whole + 1 as never);
-        const x = left == null || right == null ? null : left + (right - left) * (logical! - whole!), y = series.priceToCoordinate(marker.priceUsd);
+        // A decision's dot sits on the candle holding its time, at its price held within that candle's range (a fill's slippage can pass it),
+        // so it always touches the candle; its card keeps the exact price.
+        const index = candleIndex(bars, marker.t / 1000), bar = index == null ? null : bars[index];
+        const x = bar ? scale.timeToCoordinate(bar.time) : null, y = bar ? series.priceToCoordinate(Math.min(bar.high, Math.max(bar.low, marker.priceUsd))) : null;
         if (x == null || y == null || x < 0 || x > width || y < 0 || y > height) { node.hidden = true; continue; }
         node.hidden = false;
-        node.style.transform = `translate(${x}px, ${y}px)`;
-        points.push({ id: marker.id, x, y });
+        node.style.transform = `translate(${x + left}px, ${y + top}px)`;
+        points.push({ id: marker.id, role: marker.role, x, y });
       }
-      // A decision near the first one of an earlier pin keeps only its dot and joins that pin.
+      // A decision near the first one of an earlier pin of the same bot keeps only its dot and joins that pin.
       const clusters: { first: At; members: At[] }[] = [];
       for (const p of points) {
         let near: typeof clusters[number] | undefined;
-        for (let i = clusters.length - 1; i >= 0 && p.x - clusters[i].first.x < PIN.near; i--) if (Math.abs(clusters[i].first.y - p.y) < PIN.near) { near = clusters[i]; break; }
+        for (let i = clusters.length - 1; i >= 0 && p.x - clusters[i].first.x < PIN.near; i--) if (clusters[i].first.role === p.role && Math.abs(clusters[i].first.y - p.y) < PIN.near) { near = clusters[i]; break; }
         if (near) near.members.push(p); else clusters.push({ first: p, members: [p] });
       }
+      // The chart's controls sit on the drawing, so a head keeps out of their box as well (`keep`, grown by half a head).
+      const corner = controls.current, keep = corner?.offsetWidth ? { left: corner.offsetLeft - left - PIN.width / 2, right: corner.offsetLeft - left + corner.offsetWidth + PIN.width / 2, top: corner.offsetTop - top - PIN.height / 2, bottom: corner.offsetTop - top + corner.offsetHeight + PIN.height / 2 } : null;
       const leads: Lead[] = [], heads: { x: number; y: number }[] = [];
       for (const { first, members } of clusters) {
-        // A pin rises above its price. When an earlier head is in the way its stem grows a step at a time, above, else below, as far as the chart
-        // has room; with no free spot it keeps the first one with room, overlapping.
+        // A pin rises above its price. When an earlier head or the controls are in the way its stem grows a step at a time, above, else below, as
+        // far as the chart has room; with no free spot it keeps the first one with room, overlapping.
         const headY = (up: boolean, lift: number) => up ? first.y - PIN.head - lift : first.y + PIN.head + lift;
         const fits = (up: boolean, lift: number) => up ? first.y - PIN.rise - lift >= 0 : first.y + PIN.rise + lift <= height;
-        const free = (up: boolean, lift: number) => !heads.some(h => Math.abs(h.x - first.x) < PIN.width && Math.abs(h.y - headY(up, lift)) < PIN.height);
+        const free = (up: boolean, lift: number) => {
+          const y = headY(up, lift);
+          return !heads.some(h => Math.abs(h.x - first.x) < PIN.width && Math.abs(h.y - y) < PIN.height) && !(keep && first.x > keep.left && first.x < keep.right && y > keep.top && y < keep.bottom);
+        };
         const spots = [0, 1, 2, 3].flatMap(n => [{ up: true, lift: n * PIN.step }, { up: false, lift: n * PIN.step }]).filter(spot => fits(spot.up, spot.lift));
         const { up, lift } = spots.find(spot => free(spot.up, spot.lift)) ?? spots[0] ?? { up: true, lift: 0 };
         heads.push({ x: first.x, y: headY(up, lift) });
@@ -293,16 +429,15 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
     return () => { recolor.disconnect(); api.remove(); chart.current = null; };
   }, []);
 
-  // Second candles label the time axis and crosshair to the second.
   useEffect(() => {
-    chart.current?.api.applyOptions({ timeScale: { secondsVisible: seconds, tickMarkFormatter: (time: Time) => localTime(time, seconds) }, localization: { timeFormatter: (time: Time) => localTime(time, seconds, true) } });
+    chart.current?.api.applyOptions({ timeScale: { secondsVisible: seconds, tickMarkFormatter: (time: Time, type: TickMarkType) => tickLabel(time, type, seconds) }, localization: { timeFormatter: (time: Time) => localTime(time, seconds, true) } });
   }, [seconds]);
 
   // Only labels change units: the raw candles, entry geometry and visible time range stay intact.
   useEffect(() => {
     const c = chart.current;
     if (!c) return;
-    const formatter = (value: number) => value < 0 || (unit === 'marketCap' && !supply) ? '' : formatTokenPrice(value, unit, supply);
+    const formatter = (value: number) => value < 0 ? '' : formatTokenPrice(value, unit, supply);
     c.api.applyOptions({ localization: { priceFormatter: formatter } });
     c.candles.applyOptions({ priceFormat: { type: 'custom', formatter, minMove: 1e-12 } });
   }, [unit, supply]);
@@ -310,8 +445,12 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
   useEffect(() => {
     const c = chart.current;
     if (!c) return;
-    c.candles.setData(bars);
-    c.volume.setData(bars.map((bar): HistogramData<UTCTimestamp> => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? c.colors.volumeUp : c.colors.volumeDown })));
+    const volume = (bar: Bar): HistogramData<UTCTimestamp> => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? c.colors.volumeUp : c.colors.volumeDown });
+    const before = painted.current.bars, n = before.length;
+    const tail = painted.current.theme === theme && n > 1 && bars.length >= n && bars.length <= n + 1 && (bars.length === n ? bars[n - 1].time === before[n - 1].time : bars[n - 1].time >= before[n - 1].time) && before.every((bar, index) => index >= n - 1 || same(bars[index], bar));
+    if (tail) for (const bar of bars.slice(n - 1)) { c.candles.update(bar); c.volume.update(volume(bar)); }
+    else { c.candles.setData(bars); c.volume.setData(bars.map(volume)); }
+    painted.current = { bars, theme };
     // Frame once per coin and period, on its own candles: the latest at a readable width (older history is a scroll away, so a launch spike never flattens today's candles); later refreshes and older pages keep wherever the person scrolled or zoomed.
     if (bars.length && !candles.isPlaceholderData && fitted.current !== viewKey) {
       fitted.current = viewKey;
@@ -332,16 +471,11 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
   useEffect(() => {
     const c = chart.current, el = box.current;
     if (!c || !el) return;
-    const candleAt = (seconds: number) => {
-      if (!bars.length || seconds < bars[0].time) return null;
-      let lo = 0, hi = bars.length - 1;
-      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars[mid].time <= seconds) lo = mid; else hi = mid - 1; }
-      return bars[lo].time;
-    };
-    const ember = themeColor(el, '--ember'), list: SeriesMarker<Time>[] = [];
+    const up = themeColor(el, '--positive'), down = themeColor(el, '--destructive'), list: SeriesMarker<Time>[] = [];
     for (const [kind, m] of [['buy', rating?.buy], ['sell', rating?.sell]] as const) {
-      const time = m ? candleAt(m.t / 1000 - 1) : null;
-      if (time !== null) list.push(kind === 'buy' ? { time, position: 'belowBar', shape: 'arrowUp', color: ember, text: 'Your buy', size: 1.5 } : { time, position: 'aboveBar', shape: 'arrowDown', color: ember, text: 'Your sell', size: 1.5 });
+      const index = m ? candleIndex(bars, m.t / 1000 - 1) : null, time = index == null ? null : bars[index].time;
+      if (time !== null) list.push(kind === 'buy' ? { time, position: 'belowBar', shape: 'arrowUp', color: up, text: rating?.theirs ? 'Buy' : 'Your buy', size: 1.5 }
+        : { time, position: 'aboveBar', shape: 'arrowDown', color: down, text: rating?.theirs ? 'Sell' : 'Your sell', size: 1.5 });
     }
     c.marks.setMarkers(list.sort((a, b) => (a.time as number) - (b.time as number)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -369,42 +503,46 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
 
   const status = candles.isPending ? 'Loading the chart…' : candles.isError && !bars.length ? 'Market data is unavailable right now.' : bars.length < 2 ? 'Not enough trades in this range yet.' : null;
   // The page header carries the coin's figures, so the chart only speaks up when something is missing or still loading.
-  const note = status && !candles.isPending ? status : unit === 'marketCap' && !supply ? 'Supply unavailable' : older.isFetching ? 'Loading earlier candles…' : null;
-  // A drag moves the chart freely, price included; a mostly sideways drag (or a click) lets the price fit itself again on release.
+  const note = status && !candles.isPending ? status : older.isFetching ? 'Loading earlier candles…' : placeholder ? 'Placeholder candles' : null;
+  // A drag moves the chart freely, price included; a mostly sideways drag (or a click) lets the price fit itself again on release. A finger
+  // never moves the price (its up-and-down scrolls the page), so it leaves the fit alone.
   const grab = (event: React.PointerEvent) => {
     const scale = chart.current?.api.priceScale('right');
     if (!scale || event.button !== 0) return;
     // The corner controls fade while a finger or pointer is on the chart, so they never get in the way of a drag.
     setTouching(true);
+    const pricing = event.pointerType !== 'touch', wasFitted = scale.options().autoScale, y = event.clientY;
+    if (pricing) scale.applyOptions({ autoScale: false });
     // Capture phase on the window: the chart library stops some of its own events from bubbling, and a missed release would leave the controls faded.
+    // The first end of any kind settles the drag, so a cancelled touch leaves nothing waiting for a later release.
     const ends = ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel', 'dragend', 'blur'];
-    const release = () => { setTouching(false); ends.forEach(name => window.removeEventListener(name, release, true)); };
-    ends.forEach(name => window.addEventListener(name, release, true));
-    const wasFitted = scale.options().autoScale, y = event.clientY;
-    scale.applyOptions({ autoScale: false });
-    window.addEventListener('pointerup', up => {
-      if (Math.abs(up.clientY - y) > 12) setFree(true);
+    const release = (end: Event) => {
+      setTouching(false);
+      ends.forEach(name => window.removeEventListener(name, release, true));
+      if (!pricing) return;
+      if ((end.type === 'pointerup' || end.type === 'mouseup') && Math.abs((end as MouseEvent).clientY - y) > 12) setFree(true);
       else scale.applyOptions({ autoScale: wasFitted });
-    }, { once: true });
+    };
+    ends.forEach(name => window.addEventListener(name, release, true));
   };
   // Zooming with the wheel counts as interacting too, until it pauses.
   const zoomed = () => { setTouching(true); if (wheelTimer.current) clearTimeout(wheelTimer.current); wheelTimer.current = setTimeout(() => setTouching(false), 600); };
   const reset = () => { const c = chart.current; if (c && bars.length) { fit(c.api); setFree(false); } };
-  return <div className={`${s.surface} ${s.priceChart}`}>
+  return <div className={s.priceChart}>
     <div className={s.chartWrap} onDoubleClick={reset}>
-      <div ref={box} className={s.priceArea} data-empty={status ? '' : undefined} data-marking={rating?.mode ?? undefined} onPointerDown={grab} onWheel={zoomed} onPointerEnter={event => setHovering(event.pointerType === 'mouse')} onPointerLeave={() => setHovering(false)}/>
+      <div ref={box} className={s.priceArea} data-empty={status ? '' : undefined} data-nodata={status && !candles.isPending ? '' : undefined} data-marking={rating?.mode ?? undefined} onPointerDown={grab} onWheel={zoomed} onPointerEnter={event => setHovering(event.pointerType === 'mouse')} onPointerLeave={() => setHovering(false)}/>
       {candles.isPending && <Loading variant="box" height="100%" className={s.chartGhost} label="Loading the chart"/>}
       {note && <span className={s.chartNote}>{note}</span>}
-      {rating?.prompt && <span className={s.chartPrompt} role="status">{rating.prompt}{rating.onCancel && <button type="button" onClick={rating.onCancel}>Cancel</button>}</span>}
+      {rating?.ghost && rating.mode && <span ref={ghost} className={s.chartPin} data-kind={rating.mode} aria-hidden>{rating.mode === 'buy' ? <ArrowUp/> : <ArrowDown/>}</span>}
       {!status && markers.length > 0 && <div className={s.clouds}>{markers.map(marker => {
         const ids = groups[marker.id] ?? [marker.id], members = ids.flatMap(id => markers.find(other => other.id === id) ?? []), head = headOf(members);
-        return <div key={marker.id} hidden className={s.cloudMark} data-kind={marker.kind} data-tone={marker.tone} style={{ '--ring': RING[head.tone ?? 'flat'] } as React.CSSProperties}
+        return <div key={marker.id} hidden className={s.cloudMark} data-kind={head.kind} data-tone={head.tone} style={{ '--ring': RING[head.tone ?? 'flat'] } as React.CSSProperties}
           ref={node => { if (node) clouds.current.set(marker.id, node); else clouds.current.delete(marker.id); }} onDoubleClick={event => event.stopPropagation()}
           onPointerEnter={event => { if (event.pointerType === 'mouse') show(marker.id); }} onPointerLeave={event => { if (event.pointerType === 'mouse') hide(marker.id); }}
           onFocus={() => show(marker.id)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) hide(marker.id); }}>
           <i className={s.cloudDot}/><i className={s.cloudStem}/>
-          <button type="button" className={s.cloudBot} onPointerDown={() => { openAtTap.current = lit.current.open === marker.id; }}
-            onClick={event => { if ((event.nativeEvent as PointerEvent).pointerType === 'touch' && !openAtTap.current) show(marker.id); else onOpenMarker?.(head); }}
+          <button type="button" className={s.cloudBot} onPointerDown={event => { tap.current = { touch: event.pointerType === 'touch', wasOpen: lit.current.open === marker.id }; }}
+            onClick={() => { const pressed = tap.current; tap.current = null; if (pressed?.touch && !pressed.wasOpen) show(marker.id); else onOpenMarker?.(head); }}
             aria-label={members.length > 1 ? `${members.length} decisions here; open ${head.title}` : `${marker.title}${marker.value ? ' ' + marker.value : ''} at ${format(marker.priceUsd, supply)}, ${localTime(marker.t / 1000 as Time, true, true)}`}>
             <span><BotAvatar role={head.role} size={22}/></span>{members.length > 1 && <b>{members.length > 99 ? '99+' : members.length}</b>}
           </button>
@@ -415,17 +553,18 @@ export function CoinChart({ address, supply, entryPriceUsd, markPriceUsd, launch
           </button>)}</div></div>
         </div>;
       })}</div>}
-      {/* Phones: over the empty corner where the price and time axes meet. Wider screens: the chart's top-left corner, opening downward. */}
-      <div className={s.chartPeriod} data-dim={touching ? 'press' : hovering ? 'hover' : undefined}>
-        <button type="button" aria-pressed={choice === 'auto'} title="Auto sizes candles to the coin's age: 1-minute for its first hours, 5-minute through its first day, 15-minute after" onClick={() => setChoice(choice === 'auto' ? period : 'auto')}>Auto</button>
-        <Select value={period} onValueChange={value => setChoice(value as Period)}>
-          <SelectTrigger size="sm" aria-label="Candle size" className="data-[size=sm]:h-9 gap-1.5 rounded-full border-0 bg-foreground/[0.07] px-3.5 py-0 text-sm font-semibold shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_10%,transparent)] dark:bg-foreground/[0.07] [&_svg]:size-4"><SelectValue>{period}</SelectValue></SelectTrigger>
+      {/* Phones: over the empty corner where the price and time axes meet, Reset view on their left. Wider screens: the drawing's top-left corner,
+          opening downward, Reset view on their right. Only the size fades while the chart is in use; pin heads keep out of them. */}
+      <div ref={controls} className={s.chartPeriod}>
+        <span className={s.chartSize} data-dim={touching ? 'press' : hovering ? 'hover' : undefined}><Select value={choice} onValueChange={value => setChoice(value as 'auto' | Period)}>
+          <SelectTrigger size="sm" aria-label="Candle size" className="data-[size=sm]:h-9 gap-1.5 rounded-full border-0 px-3.5 py-0 text-sm font-semibold [&_svg]:size-4"><SelectValue>{choice !== 'auto' ? period : launchedAt === undefined && !range ? 'Auto' : `Auto (${auto})`}</SelectValue></SelectTrigger>
           <SelectContent position="popper" side={mobile ? 'top' : 'bottom'} align={mobile ? 'end' : 'start'} className="min-w-0 text-sm">
-            {PERIODS.map(([label]) => <SelectItem key={label} value={label} title={`One candle per ${PERIOD_NAME[label]}`}>{label}</SelectItem>)}
+            <SelectItem value="auto" title={range ? `One candle per ${PERIOD_NAME[auto]}, the window’s own size` : AUTO_TITLE}>Auto ({auto})</SelectItem>
+            {PERIODS.map(label => <SelectItem key={label} value={label} title={`One candle per ${PERIOD_NAME[label]}`}>{label}</SelectItem>)}
           </SelectContent>
-        </Select>
+        </Select></span>
+        {!status && (free || (away && !range)) && <button type="button" className={s.chartReset} onClick={reset} onDoubleClick={event => event.stopPropagation()} title={range?.view ? 'Back to the replay with the price fitted (or double-click the chart)' : 'Back to the latest candles with the price fitted (or double-click the chart)'}><RotateCcw size={13}/>Reset view</button>}
       </div>
-      {!status && (free || (away && !range)) && <button type="button" className={s.chartReset} onClick={reset} onDoubleClick={event => event.stopPropagation()} title={range?.view ? 'Back to the replay with the price fitted (or double-click the chart)' : 'Back to the latest candles with the price fitted (or double-click the chart)'}><RotateCcw size={13}/>Reset view</button>}
     </div>
   </div>;
 }

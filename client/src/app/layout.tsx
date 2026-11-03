@@ -12,10 +12,10 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title: 'HOTBOT', images: [{ url: '/api/og?v=2', alt: 'HOTBOT and its specialist bots: your private trading team' }] },
   icons: {
     icon: [
-      { url: '/icon.png', type: 'image/png', sizes: '32x32' },
-      { url: '/icon.svg', type: 'image/svg+xml', sizes: 'any' },
+      { url: '/icon.png?v=2', type: 'image/png', sizes: '32x32' },
+      { url: '/icon.svg?v=2', type: 'image/svg+xml', sizes: 'any' },
     ],
-    apple: { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    apple: { url: '/apple-touch-icon.png?v=2', sizes: '180x180', type: 'image/png' },
   },
   // Saved to the home screen it opens as an app, drawn under a see-through status bar.
   appleWebApp: { capable: true, title: 'HOTBOT', statusBarStyle: 'black-translucent' },

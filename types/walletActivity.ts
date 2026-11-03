@@ -4,4 +4,3 @@ export type WalletActivityEvent = {
   kind: 'swap' | 'received' | 'sent' | 'movement' | 'transaction';
   status: 'confirmed' | 'failed'; feeSol: number; movements: WalletMovement[];
 };
-export type WalletActivityPage = { items: WalletActivityEvent[]; nextCursor: string | null };

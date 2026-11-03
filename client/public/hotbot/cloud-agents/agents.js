@@ -255,7 +255,7 @@
       '</g>'+
       '<g data-move="mid">'+
         '<rect x="458" y="55" width="684" height="312" rx="9" fill="url(#'+id+'-warm-wood)" stroke="#81818c" stroke-opacity=".25"/><rect x="468" y="65" width="664" height="292" rx="3" fill="url(#'+id+'-cork)"/><path d="M473 66H1127" stroke="#a6a0a0" stroke-opacity=".18"/>'+
-        photo(560,130,-6,{src:'/hotbot/cloud-agents/profiles/rasmr-eth.jpg',handle:'@rasmr_eth'})+note(650,252,4,'SAME WALLET?')+photo(800,108,3)+note(990,122,-5,"DEV'S ALT?")+photo(1050,250,7,{src:'/hotbot/cloud-agents/profiles/frankdegods.jpg',handle:'@frankdegods'})+
+        photo(560,130,-6,{src:'/hotbot/cloud-agents/profiles/rasmr-eth.webp',handle:'@rasmr_eth'})+note(650,252,4,'SAME WALLET?')+photo(800,108,3)+note(990,122,-5,"DEV'S ALT?")+photo(1050,250,7,{src:'/hotbot/cloud-agents/profiles/frankdegods.webp',handle:'@frankdegods'})+
         '<g opacity=".25">'+farNotes+'</g>'+
         '<path d="'+strings+'" fill="none" stroke="#b14a3e" stroke-width="1.6" stroke-opacity=".85"/>'+
         '<path data-move="trace" d="'+trace+'" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" fill="none" stroke="#f0c46a" stroke-width="3" stroke-linecap="round"/>'+

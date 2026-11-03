@@ -8,10 +8,13 @@ import { viewAsAtom } from './state';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
-import { dexScreenerLogo } from '@/components/token/TokenAvatar';
+import { logoUrls } from '@/components/token/TokenAvatar';
 import type { HomeData } from './data';
 import { pct, signedSol } from './format';
 import { DecisionDialog } from './Parts';
+import { useDeskRows } from './Stream';
+import { useTabVisible } from '@/hooks/useTabVisible';
+import { PANORAMA_REF } from '../../../../types/coinKey';
 import s from './team.module.css';
 
 export type PanoramaCoin = FunctionReturnType<typeof api.team.panorama>['page'][number];
@@ -74,7 +77,7 @@ export function PanoramaButton({ data, strategyId }: { data: HomeData; strategyI
   return <>
     <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><Hexagon/>Panorama</Button>
     {open && <Dialog open onOpenChange={next => { if (!next) setOpen(false); }}>
-      <DialogContent layout="panel" className="h-dvh max-h-dvh w-screen max-w-none rounded-none pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] [&>[data-slot=dialog-close]]:top-[calc(1em+env(safe-area-inset-top))] sm:p-0 sm:[&>[data-slot=dialog-close]]:top-[1em] sm:h-[min(48rem,calc(100dvh-2rem))] sm:w-full sm:max-w-[min(76rem,calc(100vw-3rem))] sm:rounded-[1.5em]" aria-describedby={undefined}>
+      <DialogContent layout="panel" className="top-0 h-dvh max-h-dvh w-screen max-w-none translate-y-0 rounded-none pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] [&>[data-slot=dialog-close]]:top-[calc(1em+env(safe-area-inset-top))] sm:top-[calc(var(--view-top)+var(--view-h)/2)] sm:translate-y-[-50%] sm:p-0 sm:[&>[data-slot=dialog-close]]:top-[1em] sm:h-[min(48rem,calc(var(--view-h)-2rem))] sm:w-full sm:max-w-[min(76rem,calc(100vw-3rem))] sm:rounded-[1.5em]" aria-describedby={undefined}>
         <DialogTitle className="sr-only">ResearchBot’s panorama</DialogTitle>
         <Panorama data={data} strategyId={strategyId}/>
       </DialogContent>
@@ -83,20 +86,26 @@ export function PanoramaButton({ data, strategyId }: { data: HomeData; strategyI
 }
 
 function Panorama({ data, strategyId }: { data: HomeData; strategyId?: string }) {
-  const as = useAtomValue(viewAsAtom), scope = { mode: data.workspace.mode, ...(strategyId ? { strategyId } : {}), ...as };
-  const { results: history, status, loadMore } = usePaginatedQuery(api.team.panorama, scope, { initialNumItems: PAGE });
+  const as = useAtomValue(viewAsAtom), cut = data.workspace.paperCutAt, scope = { mode: data.workspace.mode, ...(strategyId ? { strategyId } : {}), ...(cut !== null ? { cutAt: cut } : {}), ...as };
+  // A practice team the worker's desk holds pages its packs since the cutover, then (`earlier`) the ledger before it; any other has no earlier part.
+  const recent = usePaginatedQuery(api.team.panorama, scope, { initialNumItems: PAGE });
+  const tail = recent.status === 'Exhausted', older = usePaginatedQuery(api.team.panorama, tail ? { ...scope, earlier: true } : 'skip', { initialNumItems: PAGE });
+  const { status, loadMore } = tail ? older : recent;
+  const practice = (strategyId ? data.strategies.find(row => row.id === strategyId)?.mode : data.workspace.mode) === 'paper', visible = useTabVisible();
+  const desk = useDeskRows<Coin>(PANORAMA_REF + (strategyId ?? ''), practice && visible);
   // The coin that made the most is read on its own (pages arrive newest first); the panorama opens on it.
   const best = useQuery(api.team.panoramaBest, scope);
   // Historical pages stay cached across price ticks; the existing home subscription carries every open bag's live mark.
   const results = useMemo(() => {
-    const bags = new Map(data.bags.map(bag => [bag.id, bag]));
-    const coins = best && !history.some(coin => coin.id === best.id) ? [best, ...history] : history;
+    const bags = new Map<string, HomeData['bags'][number]>(data.bags.map(bag => [bag.id, bag])), shown = new Set(data.strategies.map(row => row.id)), seen = new Set<string>(), coins: Coin[] = [];
+    // The desk's coins come first, as it holds them now; a coin a pack or the ledger holds too shows once. Archived strategies' stay out, as the pages leave them out.
+    for (const coin of [...(desk ?? []).filter(row => shown.has(row.strategyId)), ...(best ? [best] : []), ...recent.results, ...(tail ? older.results : [])]) if (!seen.has(coin.id)) { seen.add(coin.id); coins.push(coin); }
     return coins.map(coin => {
       const bag = bags.get(coin.id);
       return coin.outcome === 'held' && coin.entry && bag?.markPriceUsd
         ? { ...coin, pnlSol: coin.entry.sol * (bag.markPriceUsd / coin.entry.priceUsd - 1), pnlPct: (bag.markPriceUsd / coin.entry.priceUsd - 1) * 100 } : coin;
     });
-  }, [history, best, data.bags]);
+  }, [desk, best, recent.results, older.results, tail, data.bags, data.strategies]);
   const [filter, setFilter] = useState<Filter>('all'), [hideRest, setHideRest] = useState(false), [grouped, setGrouped] = useState(!strategyId), [hover, setHover] = useState<string | null>(null), [open, setOpen] = useState<string | null>(null);
   // The decision loads once the pointer rests on a coin (or presses it), so its dialog opens without waiting.
   useQuery(api.team.item, hover ? { id: hover, ...as } : 'skip');
@@ -107,7 +116,7 @@ function Panorama({ data, strategyId }: { data: HomeData; strategyId?: string })
   const more = () => { if (status === 'CanLoadMore' && results.length < LIMIT) loadMore(PAGE); };
   return <div className={s.panorama}>
     <header className={s.panoramaHead}>
-      <div><h2>ResearchBot’s panorama</h2><small>{status === 'LoadingFirstPage' ? 'Loading coins…' : `${results.length.toLocaleString()} ${results.length === 1 ? 'coin' : 'coins'} checked${status === 'LoadingMore' ? ' · loading older' : ''}`}</small></div>
+      <div><h2>ResearchBot’s panorama</h2><small>{recent.status === 'LoadingFirstPage' ? 'Loading coins…' : `${results.length.toLocaleString()} ${results.length === 1 ? 'coin' : 'coins'} checked${status === 'LoadingMore' || status === 'LoadingFirstPage' ? ' · loading older' : ''}`}</small></div>
       <div className={s.panoramaControls}>
         <div className={s.panoramaSwitches}>
           {!strategyId && <label className={s.panoramaSwitch}><Switch checked={grouped} onCheckedChange={setGrouped} aria-label="Group coins into strategy islands"/>Islands</label>}
@@ -117,7 +126,7 @@ function Panorama({ data, strategyId }: { data: HomeData; strategyId?: string })
       </div>
     </header>
     {/* The first sync waits for the best coin, so the panorama opens on it instead of jumping there. */}
-    <PanoramaStage islands={islands} names={names} grouped={grouped} filter={filter} hideRest={hideRest} ready={best !== undefined && status !== 'LoadingFirstPage'} onMore={more} onOpen={setOpen} onHover={setHover}>
+    <PanoramaStage islands={islands} names={names} grouped={grouped} filter={filter} hideRest={hideRest} ready={best !== undefined && recent.status !== 'LoadingFirstPage'} onMore={more} onOpen={setOpen} onHover={setHover}>
       {status !== 'LoadingFirstPage' && !results.length && <p className={s.panoramaEmpty}>ResearchBot’s verdicts land here as it checks coins.</p>}
       {hideRest && filter !== 'all' && results.length > 0 && !counts[filter] && <p className={s.panoramaEmpty}>{NONE[filter]}</p>}
     </PanoramaStage>
@@ -167,20 +176,19 @@ export function PanoramaStage({ islands, names, grouped, filter = 'all', hideRes
     };
     const placeholder = (outcome: Outcome) => { let sprite = placeholders.get(outcome); if (!sprite) { sprite = cut(outcome, null, ''); placeholders.set(outcome, sprite); } return sprite; };
     const drop = (node: Node) => { if (node.sprite) { bytes -= node.res ** 2 * 4; node.sprite = null; node.res = 0; } };
-    // Logos load a dozen at a time, only for coins drawn on screen, small while zoomed out and full size up close: Mobula's first, then DexScreener's through the shared batched lookup, then a letter.
+    // Logos load a dozen at a time, only for coins drawn on screen, small while zoomed out and full size up close: the indexer's first, then DexScreener's through the shared batched lookup, then a letter.
     const pump = () => {
       while (loads < LOADS && queue.length) {
         const node = queue.shift()!;
         if (tickCount - node.used > 2) { node.loading = 0; continue; }
         if (node.logo === null) { cuts.push({ node, logo: null }); continue; }
         loads++;
-        const img = new Image();
-        let fellBack = node.logo !== undefined;
+        const img = new Image(), urls = node.logo ? [node.logo] : logoUrls(node.coin.address);
         const done = (logo: HTMLImageElement | null) => { loads--; node.logo = logo ? img.src : null; cuts.push({ node, logo }); pump(); wake(); };
+        const next = () => { const url = urls.shift(); if (url) img.src = url; else done(null); };
         img.onload = () => done(img);
-        img.onerror = () => { if (fellBack) return done(null); fellBack = true; void dexScreenerLogo(node.coin.address).then(url => { if (url) img.src = url; else done(null); }); };
-        const first = node.logo ?? node.coin.logoUri;
-        if (first) img.src = first; else img.onerror(new Event('error'));
+        img.onerror = next;
+        next();
       }
     };
     const request = (node: Node, size: number) => { if (!node.loading) { node.loading = size; queue.push(node); pump(); } };

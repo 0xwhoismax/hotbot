@@ -1,17 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAtom } from 'jotai';
 import { useTheme } from 'next-themes';
-import { Moon, Palette, RotateCcw, Sun } from 'lucide-react';
+import { Monitor, Moon, Palette, RotateCcw, Sun } from 'lucide-react';
 import { BACKDROP_OPTIONS, CORNER_OPTIONS, DEFAULT_APPEARANCE, LOOK_OPTIONS, SCHEME_OPTIONS, SURFACE_OPTIONS, sameAppearance, type Appearance } from '@/lib/appearance';
 import { appearanceAtom } from '@/store/ui/atoms';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 
-type AppearancePickerProps = { persist?: (value: Appearance | null) => Promise<unknown>; iconOnly?: boolean };
+type Persist = (value: Appearance | null) => Promise<unknown>;
+/** `sheet` opens the phone's sheet from outside, with no trigger of its own (MobileNav's menu). */
+export type AppearancePickerProps = { persist?: Persist; iconOnly?: boolean; sheet?: { open: boolean; onOpenChange: (open: boolean) => void } };
 
 /** How round each corner glyph is drawn, so the button shows its own setting. */
 const CORNER_GLYPH = { sharp: '1px', crisp: '3px', soft: '6px', round: '9px' } as const;
@@ -24,9 +29,25 @@ function lookTile(look: Appearance, dark: boolean): CSSProperties {
   return { background: dark ? scheme.dark : scheme.light, borderRadius: CORNER_GLYPH[look.corners], ...edge };
 }
 
-export function AppearancePicker({ persist, iconOnly = false }: AppearancePickerProps) {
+/** A phone gets the choices in a bottom sheet with full-size controls; a wide screen gets them in a popover. */
+export function AppearancePicker({ persist, iconOnly = false, sheet }: AppearancePickerProps) {
+  const editor = useAppearanceEditor(persist), mobile = useIsMobile();
+  const trigger = <Button variant="outline" size={iconOnly ? 'icon' : 'default'} className={iconOnly ? undefined : 'w-full'} aria-label="Theme" title="Theme"><Palette />{!iconOnly && <span>Theme</span>}</Button>;
+  if (sheet || mobile) return <Sheet {...sheet}>
+    {!sheet && <SheetTrigger asChild>{trigger}</SheetTrigger>}
+    <SheetContent side="bottom" aria-describedby={undefined} className="text-base [&_[data-slot=button]]:h-[2.75rem]">
+      <SheetHeader className="pt-[0.25em] pb-[0.5em]"><SheetTitle>Theme</SheetTitle></SheetHeader>
+      <div className="px-[1em] pb-[1.25em]"><AppearanceOptions editor={editor}/></div>
+    </SheetContent>
+  </Sheet>;
+  return <Popover><PopoverTrigger asChild>{trigger}</PopoverTrigger>
+    <PopoverContent align="end" className="w-[22em] max-w-[calc(100vw-2rem)]"><AppearanceOptions editor={editor}/></PopoverContent>
+  </Popover>;
+}
+
+function useAppearanceEditor(persist?: Persist) {
   const [saved, setAppearance] = useAtom(appearanceAtom);
-  const { resolvedTheme, setTheme } = useTheme(), dark = resolvedTheme !== 'light';
+  const { theme = 'system', resolvedTheme, setTheme } = useTheme(), dark = resolvedTheme !== 'light';
   const [error, setError] = useState<string | null>(null);
   const current = saved ?? DEFAULT_APPEARANCE;
   const pending = useRef<Appearance | null | undefined>(undefined);
@@ -51,22 +72,26 @@ export function AppearancePicker({ persist, iconOnly = false }: AppearancePicker
     pending.current = value;
     void flush();
   }
-  const choose = (patch: Partial<Appearance>) => select({ ...current, ...patch });
-  const option = (selected: boolean) => ({ variant: selected ? 'secondary' : 'outline', 'aria-pressed': selected, size: 'sm' } as const);
-  return <Popover><PopoverTrigger asChild><Button variant="outline" size={iconOnly ? 'icon' : 'default'} className={iconOnly ? undefined : 'w-full'} aria-label="Theme" title="Theme"><Palette />{!iconOnly && <span>Theme</span>}</Button></PopoverTrigger>
-    <PopoverContent align="end" className="w-[22em] max-w-[calc(100vw-2rem)] space-y-[1.1em]">
-      <PopoverHeader><PopoverTitle>Appearance</PopoverTitle></PopoverHeader>
+  const choose = (patch: Partial<Appearance>) => { const next = { ...current, ...patch }; select(sameAppearance(next, DEFAULT_APPEARANCE) ? null : next); };
+  return { current, dark, theme, setTheme, error, select, choose };
+}
+
+function AppearanceOptions({ editor: { current, dark, theme, setTheme, error, select, choose } }: { editor: ReturnType<typeof useAppearanceEditor> }) {
+  const option = (selected: boolean) => ({ variant: 'outline', 'aria-pressed': selected, size: 'sm' } as const);
+  // A section that comes and goes opens and closes in place, like every other (ui/collapsible).
+  const reveal = (show: boolean, node: ReactNode) => <Collapsible open={show}><CollapsibleContent><div className="pt-[1.1em]">{node}</div></CollapsibleContent></Collapsible>;
+  return <>
       <div className="space-y-2"><Label>Look</Label><div className="grid grid-cols-3 gap-[0.4em]">
-        {LOOK_OPTIONS.map(look => {
-          const selected = sameAppearance(current, look.appearance);
-          return <button key={look.id} type="button" aria-pressed={selected} onClick={() => select(look.id === 'default' ? null : look.appearance)}
+        {LOOK_OPTIONS.map(({ id, label, look }) => {
+          const selected = current.surface === look.surface && current.backdrop === look.backdrop;
+          return <button key={id} type="button" aria-pressed={selected} onClick={() => choose(look)}
             className={cn('flex flex-col items-stretch gap-[0.45em] rounded-md p-[0.45em] text-xs outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring', selected && 'bg-secondary font-medium')}>
-            <span aria-hidden className="h-[2.25em]" style={lookTile(look.appearance, dark)} />
-            {look.label}
+            <span aria-hidden className={cn('h-[2.25em]', look.surface === 'bold' && 'hotbot-arcade-tile')} style={lookTile({ ...current, ...look }, dark)} />
+            {label}
           </button>;
         })}
       </div></div>
-      <div className="space-y-2"><Label>Colour</Label><div className="grid grid-cols-5 gap-[0.4em]">
+      <div className="space-y-2 pt-[1.1em]"><Label>Colour</Label><div className="grid grid-cols-5 gap-[0.4em]">
         {SCHEME_OPTIONS.map(scheme => {
           const selected = current.scheme === scheme.id;
           return <button key={scheme.id} type="button" aria-pressed={selected} onClick={() => choose({ scheme: scheme.id })}
@@ -76,24 +101,24 @@ export function AppearancePicker({ persist, iconOnly = false }: AppearancePicker
           </button>;
         })}
       </div></div>
-      <div className="space-y-2"><Label>Mode</Label><div className="grid grid-cols-2 gap-2">
-        <Button {...option(dark)} onClick={() => setTheme('dark')}><Moon />Dark</Button>
-        <Button {...option(!dark)} onClick={() => setTheme('light')}><Sun />Light</Button>
+      <div className="space-y-2 pt-[1.1em]"><Label>Mode</Label><div className="grid grid-cols-3 gap-2">
+        <Button {...option(theme === 'dark')} onClick={() => setTheme('dark')}><Moon />Dark</Button>
+        <Button {...option(theme === 'light')} onClick={() => setTheme('light')}><Sun />Light</Button>
+        <Button {...option(theme === 'system')} onClick={() => setTheme('system')}><Monitor />System</Button>
       </div></div>
-      <div className="space-y-2"><Label>Cards</Label><div className="grid grid-cols-3 gap-2">
+      {reveal(current.surface !== 'bold', <div className="space-y-2"><Label>Cards</Label><div className="grid grid-cols-3 gap-2">
         {SURFACE_OPTIONS.map(surface => <Button key={surface.id} {...option(current.surface === surface.id)} onClick={() => choose({ surface: surface.id })}>{surface.label}</Button>)}
-      </div></div>
-      <div className="space-y-2"><Label>Background</Label><div className="grid grid-cols-4 gap-2">
+      </div></div>)}
+      <div className="space-y-2 pt-[1.1em]"><Label>Background</Label><div className="grid grid-cols-2 gap-2">
         {BACKDROP_OPTIONS.map(backdrop => <Button key={backdrop.id} {...option(current.backdrop === backdrop.id)} onClick={() => choose({ backdrop: backdrop.id })}>{backdrop.label}</Button>)}
       </div></div>
       {/* Phones keep round corners, so the choice only shows where it applies. */}
-      <div className="hidden space-y-2 md:block"><Label>Corners</Label><div className="grid grid-cols-4 gap-2">
+      <div className="hidden space-y-2 pt-[1.1em] md:block"><Label>Corners</Label><div className="grid grid-cols-4 gap-2">
         {CORNER_OPTIONS.map(corner => <Button key={corner.id} {...option(current.corners === corner.id)} onClick={() => choose({ corners: corner.id })}>
           <span aria-hidden className="size-[0.8em] shrink-0 border-l-2 border-t-2 border-current" style={{ borderTopLeftRadius: CORNER_GLYPH[corner.id] }} />{corner.label}
         </Button>)}
       </div></div>
-      {!sameAppearance(current, DEFAULT_APPEARANCE) && <Button variant="ghost" className="w-full" onClick={() => select(null)}><RotateCcw />Reset to default</Button>}
+      {reveal(!sameAppearance(current, DEFAULT_APPEARANCE), <Button variant="ghost" className="w-full" onClick={() => select(null)}><RotateCcw />Reset to default</Button>)}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    </PopoverContent>
-  </Popover>;
+  </>;
 }

@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Check, Copy, Layers3, ShieldCheck, Workflow } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpRight, Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useTokenBuy } from '@/hooks/useTokenBuy';
+import { useVisitor } from '@/store/user/atoms';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BotPortrait, botInfo, type BotRole } from './BotPortrait';
@@ -60,6 +62,8 @@ function Crew({ small = false }: { small?: boolean }) {
 }
 
 export function HotbotLanding({ links }: { links: LaunchLinks }) {
+  const buy = useTokenBuy() ? links.buy : null;
+  const visitor = useVisitor(), cta = { signedIn: { href: links.app ?? '/app', label: 'OPEN APP' }, returning: { href: '/app?signin', label: 'SIGN IN' }, applied: { href: '/app?check', label: 'CHECK STATUS' }, new: { href: '/join', label: 'APPLY FOR BETA ACCESS' } }[visitor];
   const root = useRef<HTMLDivElement>(null);
   const worldSection = useRef<HTMLElement>(null);
   const [applyInView, setApplyInView] = useState(true);
@@ -146,22 +150,26 @@ export function HotbotLanding({ links }: { links: LaunchLinks }) {
     <header className={s.header}>
       <div className={s.navInner}>
         <a className={s.brand} href="#top" aria-label="HOTBOT home"><FlameMark/><span>hotbot</span></a>
-        <nav className={s.navActions} aria-label="Main navigation"><a className={s.litepaperLink} href="/litepaper">Litepaper</a><Button asChild variant="outline"><a href="/join">APPLY</a></Button></nav>
+        <nav className={s.navActions} aria-label="Main navigation"><a className={s.litepaperLink} href="/litepaper">Litepaper</a>{(visitor === 'applied' || visitor === 'new') && <a className={s.litepaperLink} href="/app?signin">Sign in</a>}<Button asChild size="lg" variant="outline"><a href={cta.href}>{visitor === 'new' ? 'APPLY' : cta.label}</a></Button></nav>
       </div>
     </header>
 
     <main id="hotbot-main">
       <section id="top" className={s.hero}>
         <div className={s.heroAtmosphere} aria-hidden="true"/>
-        <div className={s.heroCopy}><h1>Your private <span>trading team.</span></h1><p className={s.heroDescription}>Specialist bots working together wherever you trade.</p><p className={s.heroCapabilities}>research | snipe | trade | launch + more</p><div className={s.heroActions}><Button asChild variant="hotbot"><a href="/join" data-apply>APPLY FOR BETA ACCESS<ArrowRight/></a></Button><Button asChild variant="outline"><a href={links.buy} target="_blank" rel="noopener noreferrer">BUY TOKEN<ArrowUpRight/></a></Button></div></div>
+        <div className={s.heroCopy}><h1>Your private <span>trading team.</span></h1><p className={s.heroDescription}>Specialist bots working together wherever you trade.</p><div className={s.heroActions}><Button asChild size="lg" className={s.shine}><a href={cta.href} data-apply>{cta.label}<ArrowRight/></a></Button>{buy && <Button asChild size="lg" variant="outline"><a href={buy} target="_blank" rel="noopener noreferrer">BUY TOKEN<ArrowUpRight/></a></Button>}</div></div>
         <Crew/>
         <div className={s.heroBottom}><a href="#hot" aria-label="Explore HOTBOT"><ArrowDown size={17}/></a></div>
       </section>
 
-      <section id="hot" className={`${s.tokenSection} ${s.container}`} data-reveal>
-        <div className={s.tokenCopy}><h2>Buy $HOTBOT<br/><span>on Pump.fun</span></h2><p>The token behind HOTBOT.<br/>Be part of what comes next.</p><div className={s.buttonRow}><Button asChild variant="hotbot"><a href={links.buy} target="_blank" rel="noopener noreferrer">BUY $HOTBOT<ArrowUpRight/></a></Button></div><button type="button" className={s.contractRow} onClick={copyContract} aria-label="Copy contract address"><PlatformBrand name="Pump.fun" compact/><span className={s.contractAddress}>{links.contract.slice(0, 6)}…{links.contract.slice(-6)}</span><span className={s.contractCopy} data-copied={copyState === 'copied'}>{copyState === 'copied' ? <Check/> : <Copy/>}{copyState === 'copied' ? 'COPIED' : 'COPY CA'}</span></button></div>
+      {buy ? <section id="hot" className={`${s.tokenSection} ${s.container}`} data-reveal>
+        <div className={s.tokenCopy}><h2>Buy $HOTBOT<br/><span>on Pump.fun</span></h2><p>The token behind HOTBOT.<br/>Be part of what comes next.</p><div className={s.buttonRow}><Button asChild variant="hotbot"><a href={buy} target="_blank" rel="noopener noreferrer">BUY $HOTBOT<ArrowUpRight/></a></Button></div><button type="button" className={s.contractRow} onClick={copyContract} aria-label="Copy contract address"><PlatformBrand name="Pump.fun" compact/><span className={s.contractAddress}>{links.contract.slice(0, 6)}…{links.contract.slice(-6)}</span><span className={s.contractCopy} data-copied={copyState === 'copied'}>{copyState === 'copied' ? <Check/> : <Copy/>}{copyState === 'copied' ? 'COPIED' : 'COPY CA'}</span></button></div>
         <TokenSculpture/>
       </section>
+      : <section id="hot" className={`${s.caCheck} ${s.container}`} data-reveal>
+        <h2>Check the CA<br/><span>Official $HOTBOT contract</span></h2>
+        <button type="button" className={s.caCheckAddress} onClick={copyContract} aria-label="Copy contract address"><span className={s.contractAddress}>{links.contract}</span><span className={s.contractCopy} data-copied={copyState === 'copied'}>{copyState === 'copied' ? <Check/> : <Copy/>}{copyState === 'copied' ? 'COPIED' : 'COPY CA'}</span></button>
+      </section>}
 
       <section id="product" className={`${s.section} ${s.container} ${s.messageSection}`} data-reveal>
         <div className={s.sectionCopy}><h2>Message HOTBOT<br/><span>like your trading team.</span></h2><p>Tell HOTBOT what you want done, from desktop or mobile. Research a token, watch an entry, prepare a trade, or launch something.</p><p>HOTBOT gets the right specialists on it and brings you back in when something needs your attention.</p><a className={s.textLink} href="#strategies">Give HOTBOT your Strategy<ArrowRight size={17}/></a></div><MessagePreview/>
@@ -190,12 +198,10 @@ export function HotbotLanding({ links }: { links: LaunchLinks }) {
         <div className={s.sectionCopy}><h2>Give each specialist<br/><span>a job.</span></h2><div className={s.rolePicker} aria-label="Explore each specialist">{(['hotbot', ...worlds] as const).map(role => <Button key={role} variant={specialist === role ? 'secondary' : 'ghost'} size="sm" aria-pressed={specialist === role} onClick={() => setSpecialist(role)} style={{ '--bot-color': botInfo[role].color } as CSSProperties}>{role === 'hotbot' ? 'HOTBOT' : botInfo[role].name}</Button>)}</div><p className={s.specialistDescription} aria-live="polite">{specialistDescription}</p><div className={s.principles}><span><Check/>Multiple setups in progress</span><span><Check/>Findings shared between specialists</span><span><Check/>Your rules applied every time</span></div></div>
       </section>
 
-      <section className={`${s.platformSection} ${s.container}`} data-reveal><div><h2 className={s.foundationBrand}>Built on <PlatformBrand name="ClawPump"/>.</h2><p>ClawPump gives the agents wallets and crypto capabilities. HOTBOT turns them into your private trading team.</p></div><div className={s.foundationFeatures}><span><ShieldCheck/>Wallets with your permissions</span><span><Layers3/>Market data for your setups</span><span><Workflow/>Swaps and token launches</span></div></section>
-
-      <section className={s.finalSection} data-reveal><h2>Meet your<br/><span>trading team.</span></h2><p>You keep trenching. Your team handles the repetition.</p><Button asChild variant="hotbot"><a href="/join" data-apply>APPLY FOR BETA ACCESS<ArrowRight/></a></Button><Crew small/></section>
+      <section className={s.finalSection} data-reveal><h2>Meet your<br/><span>trading team.</span></h2><p>You keep trenching. Your team handles the repetition.</p><Button asChild size="lg" className={s.shine}><a href={cta.href} data-apply>{cta.label}<ArrowRight/></a></Button><Crew small/></section>
     </main>
-    <footer className={`${s.footer} ${s.container}`}><a className={s.brand} href="#top"><FlameMark/><span>usehotbot<span className={s.brandSuffix}>.com</span></span></a><nav aria-label="Footer"><a href="#product">Product</a><a href="#specialists">The team</a><a href="#strategies">Strategies</a><a href="/litepaper">Litepaper</a></nav><small>© {new Date().getFullYear()} HOTBOT</small></footer>
-    <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent className={`dark ${s.landingDialog}`}>{dialog === 'launch' ? <><DialogHeader><DialogTitle>HOTBOT is coming soon</DialogTitle><DialogDescription>Your private trading team is getting ready. Check back soon.</DialogDescription></DialogHeader><Button variant="hotbot" onClick={() => setDialog(null)}>ok gotchu</Button></> : <><DialogHeader><DialogTitle>The $HOTBOT token</DialogTitle><DialogDescription>The official contract address on Pump.fun.</DialogDescription></DialogHeader><div className="space-y-3"><p className="break-all text-sm">{links.contract}</p><Button variant="outline" onClick={copyContract}>{copyState === 'copied' ? <Check/> : <Copy/>}{copyState === 'copied' ? 'Copied' : 'Copy contract'}</Button>{copyState === 'error' && <p className="text-sm text-muted-foreground">Copy wasn’t available. You can select the address above.</p>}</div><Button variant="outline" onClick={() => setDialog(null)}>Back to the team</Button></>}</DialogContent></Dialog>
-    <a className={s.applyPill} href="/join" data-visible={!applyInView}>APPLY FOR BETA ACCESS<ArrowRight size={16}/></a>
+    <footer className={`${s.footer} ${s.container}`}><a className={s.brand} href="#top"><FlameMark/><span>usehotbot<span className={s.brandSuffix}>.com</span></span></a><nav aria-label="Footer"><a href="#product">Product</a><a href="#specialists">The team</a><a href="#strategies">Strategies</a><a href="/litepaper">Litepaper</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></nav><small>© {new Date().getFullYear()} HOTBOT</small></footer>
+    <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent className={`dark ${s.landingDialog}`}>{dialog === 'launch' ? <><DialogHeader><DialogTitle>HOTBOT is coming soon</DialogTitle><DialogDescription>Your private trading team is getting ready. Check back soon.</DialogDescription></DialogHeader><Button variant="hotbot" onClick={() => setDialog(null)}>ok gotchu</Button></> : <><DialogHeader><DialogTitle>The $HOTBOT token</DialogTitle><DialogDescription>{buy ? 'The official contract address on Pump.fun.' : 'The official contract address.'}</DialogDescription></DialogHeader><div className="space-y-3"><p className="break-all text-sm">{links.contract}</p><Button variant="outline" onClick={copyContract}>{copyState === 'copied' ? <Check/> : <Copy/>}{copyState === 'copied' ? 'Copied' : 'Copy contract'}</Button>{copyState === 'error' && <p className="text-sm text-muted-foreground">Copy wasn’t available. You can select the address above.</p>}</div><Button variant="outline" onClick={() => setDialog(null)}>Back to the team</Button></>}</DialogContent></Dialog>
+    <a className={s.applyPill} href={cta.href} data-visible={!applyInView}>{cta.label}<ArrowRight size={16}/></a>
   </div>;
 }

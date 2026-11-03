@@ -8,7 +8,7 @@ self.addEventListener('push', event => {
   if (!event.data) return;
   let message; try { message = event.data.json(); } catch { return; }
   event.waitUntil(self.registration.showNotification(message.title || 'Basics', {
-    body: message.body || '', icon: '/icon.svg', ...(message.tag ? { tag: message.tag } : {}), data: { url: destination(message.url) },
+    body: message.body || '', icon: '/icon-192.png', ...(message.tag ? { tag: message.tag } : {}), data: { url: destination(message.url) },
   }));
 });
 self.addEventListener('notificationclick', event => {
