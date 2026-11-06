@@ -12,5 +12,15 @@
   },
   "dependencies": {
     "convex": "1.46.0"
+  },
+  "overrides": {
+    "sharp": "0.35.5",
+    "viem": "2.57.7",
+    "@dynamic-labs/wallet-book": {
+      "zod": "4.6.7"
+    },
+    "@dynamic-labs-sdk/client": {
+      "zod": "4.6.7"
+    }
   }
 }
