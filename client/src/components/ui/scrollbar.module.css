@@ -1,0 +1,78 @@
+.frame {
+  --page-scrollbar-width: 1.5em;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding-inline-start: var(--page-scrollbar-width);
+}
+
+.rail {
+  position: absolute;
+  z-index: 20;
+  inset-block-start: 50%;
+  inset-inline-start: 0;
+  width: var(--page-scrollbar-width);
+  height: min(9em, calc(100% - 2em));
+  transform: translateY(-50%);
+  color: var(--foreground);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: ns-resize;
+  outline: none;
+}
+
+.rail[data-overflow="false"] { visibility: hidden; pointer-events: none; }
+.dots, .thumb { position: absolute; inset-block-start: 0; inset-inline-start: 50%; pointer-events: none; }
+.dots {
+  height: 100%;
+  width: 0.1875em;
+  margin-inline-start: -0.09375em;
+  background-image: radial-gradient(circle, currentColor 0.075em, transparent 0.09375em);
+  background-size: 100% 0.875em;
+  background-repeat: repeat-y;
+  opacity: 0.22;
+  transition: opacity 120ms ease;
+}
+.thumb {
+  height: var(--scroll-thumb-height, 2em);
+  width: 0.25em;
+  margin-inline-start: -0.125em;
+  border-radius: 1em;
+  background: currentColor;
+  /* Keep the dot mask fixed to the rail while the pill moves behind it. */
+  -webkit-mask-image: radial-gradient(circle, #000 0.075em, transparent 0.09375em);
+  mask-image: radial-gradient(circle, #000 0.075em, transparent 0.09375em);
+  -webkit-mask-size: 100% 0.875em;
+  mask-size: 100% 0.875em;
+  -webkit-mask-repeat: repeat-y;
+  mask-repeat: repeat-y;
+  -webkit-mask-position: center calc(0px - var(--scroll-thumb-offset, 0px));
+  mask-position: center calc(0px - var(--scroll-thumb-offset, 0px));
+  transform: translateY(var(--scroll-thumb-offset, 0));
+  opacity: 0.95;
+  transition: opacity 120ms ease;
+}
+.rail:is(:hover, :focus-visible, [data-dragging="true"]) .dots { opacity: 0.35; }
+.rail:is(:hover, :focus-visible, [data-dragging="true"]) .thumb { opacity: 1; }
+.rail:focus-visible { outline: 0.125em solid var(--ring); outline-offset: -0.25em; border-radius: 0.75em; }
+
+/* Attached to the actual scroll owner while the custom control is connected. */
+.viewport { scrollbar-width: none !important; scrollbar-gutter: auto !important; }
+.viewport::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+
+@media (pointer: coarse) { .frame { --page-scrollbar-width: 2.75em; } }
+/* Phones scroll by touch; the rail and its gutter would only take width from the page. */
+@media (max-width: 48rem) { .frame { --page-scrollbar-width: 0px; } .rail { display: none; } }
+@media (prefers-reduced-motion: reduce) { .dots, .thumb { transition: none; } }
+@media (forced-colors: active) {
+  .rail { color: CanvasText; forced-color-adjust: none; }
+  .dots { opacity: 0.4; }
+  .thumb { opacity: 1; background: Highlight; }
+  .rail:focus-visible { outline-color: Highlight; }
+}

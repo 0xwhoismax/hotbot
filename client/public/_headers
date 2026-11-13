@@ -1,0 +1,10 @@
+# Next names every built file by its content, so a browser keeps it for good.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The site's art and the landing scene's scripts change under a new name or a new ?v=, so a browser keeps them a day and refreshes in the background.
+/hotbot/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/icons/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800

@@ -1,0 +1,7 @@
+
+.env.local
+certificates/
+*.pem
+.open-next
+.wrangler
+.dev.vars
